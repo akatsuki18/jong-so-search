@@ -96,6 +96,25 @@ export default function Home() {
                 </p>
               )}
 
+              {/* 喫煙情報 */}
+              {place.smoking && (
+                <div className="mt-2 inline-flex items-center gap-1 text-sm text-white px-2 py-1 rounded-full
+                  bg-green-500 dark:bg-green-600" // 禁煙
+                  style={{
+                    backgroundColor:
+                      place.smoking === '禁煙' ? '#4ade80' : // green-400
+                      place.smoking === '分煙' ? '#facc15' : // yellow-400
+                      place.smoking === '喫煙可' ? '#f87171' : // red-400
+                      '#9ca3af' // gray-400 for 情報なし
+                  }}
+                >
+                  {place.smoking === '禁煙' && <>🚭 禁煙</>}
+                  {place.smoking === '分煙' && <>🚬 分煙</>}
+                  {place.smoking === '喫煙可' && <>🔥 喫煙可</>}
+                  {place.smoking === '情報なし' && <>❓ 情報なし</>}
+                </div>
+              )}
+
               {/* 星評価 */}
               <div className="flex items-center gap-2 text-sm mt-2">
                 <span className="text-gray-800">⭐ {place.rating}（{place.user_ratings_total}件）</span>
