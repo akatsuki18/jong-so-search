@@ -6,11 +6,29 @@ export default function Home() {
   const [results, setResults] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const cacheRef = useRef<Map<string, any[]>>(new Map());
+  const [locationLat, setLocationLat] = useState<number | null>(null);
+  const [locationLng, setLocationLng] = useState<number | null>(null);
+
+  function calculateDistance(lat1: number, lng1: number, lat2: number, lng2: number) {
+    const R = 6371; // 地球の半径 (km)
+    const dLat = (lat2 - lat1) * Math.PI / 180;
+    const dLng = (lng2 - lng1) * Math.PI / 180;
+    const a =
+      Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+      Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+      Math.sin(dLng / 2) * Math.sin(dLng / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    const distance = R * c;
+
+    return distance; // 単位：km
+  }
 
   const handleGetLocation = () => {
     navigator.geolocation.getCurrentPosition(
       async (position) => {
         const { latitude, longitude } = position.coords;
+        setLocationLat(latitude);
+        setLocationLng(longitude);
 
         const cacheKey = `${latitude.toFixed(4)},${longitude.toFixed(4)}`;
 
@@ -89,6 +107,10 @@ export default function Home() {
       <div className="flex flex-col gap-6">
         {results.map((place, index) => {
           const googleMapsUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(place.name + ' ' + place.address)}`;
+          const distance = (place.lat && place.lng && locationLat !== null && locationLng !== null)
+            ? calculateDistance(locationLat, locationLng, place.lat, place.lng)
+            : null;
+          const walkingMinutes = distance !== null ? Math.floor(distance * 13) : null;
 
           return (
             <div key={index} className="p-4 bg-white border border-gray-200 rounded-2xl shadow-md">
@@ -102,6 +124,11 @@ export default function Home() {
               </a>
 
               <p className="text-gray-600 text-sm mt-1">{place.address}</p>
+
+              {/* ★ 距離を表示！ */}
+              {distance !== null && (
+                <p className="text-gray-600 text-sm mt-1">📍 現在地から {distance.toFixed(1)} km（徒歩{walkingMinutes}分）</p>
+              )}
 
               <div className="flex items-center gap-2 text-sm mt-2">
                 <span className="text-gray-800">⭐ {place.rating}（{place.user_ratings_total}件）</span>
