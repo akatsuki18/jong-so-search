@@ -56,8 +56,6 @@ def search_jongso(location: Location):
     )
 
     results = []
-    non_smoking_keywords = ["禁煙", "ノンスモーキング", "non-smoking", "クリーン"]
-
     for place in places_result.get("results", []):
         name = place.get("name", "")
         address = place.get("vicinity", "")
@@ -72,10 +70,6 @@ def search_jongso(location: Location):
         )
         reviews = details.get("result", {}).get("reviews", [])
         review_texts = [r.get("text", "") for r in reviews]
-
-        # 禁煙判定
-        text = (name + " " + address).lower()
-        is_non_smoking = any(keyword.lower() in text for keyword in non_smoking_keywords)
 
         # ★ ここでLangChain使ってレビュー感情分析
         summary = ""
