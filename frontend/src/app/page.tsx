@@ -1,144 +1,137 @@
 'use client';
 
-import { useState } from 'react';
-import useSWR from 'swr';
-
-// fetcher関数を定義
-const fetcher = async (url: string, location: { latitude: number; longitude: number }) => {
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(location),
-  });
-  const data = await res.json();
-  return data.results || [];
-};
-
-// 距離計算
-const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: number) => {
-  const R = 6371; // km
-  const dLat = (lat2 - lat1) * Math.PI / 180;
-  const dLon = (lon2 - lon1) * Math.PI / 180;
-  const a =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
-    Math.sin(dLon / 2) ** 2;
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-  return R * c;
-};
+import { useState, useRef } from 'react';
 
 export default function Home() {
-  const [location, setLocation] = useState<{ latitude: number; longitude: number } | null>(null);
-
-  const { data: results, error, isLoading } = useSWR(
-    location ? ['http://localhost:8000/search', location] : null,
-    ([url, loc]) => fetcher(url, loc)
-  );
+  const [results, setResults] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
+  const cacheRef = useRef<Map<string, any[]>>(new Map());
 
   const handleGetLocation = () => {
     navigator.geolocation.getCurrentPosition(
-      (position) => {
+      async (position) => {
         const { latitude, longitude } = position.coords;
-        setLocation({ latitude, longitude });
+        const cacheKey = `${latitude.toFixed(4)},${longitude.toFixed(4)}`;
+
+        const cached = localStorage.getItem(cacheKey);
+        if (cached) {
+          const parsed = JSON.parse(cached);
+          const cacheAge = Date.now() - parsed.timestamp;
+          const oneDay = 24 * 60 * 60 * 1000;
+          if (cacheAge < oneDay) {
+            setResults(parsed.data);
+            return;
+          } else {
+            localStorage.removeItem(cacheKey);
+          }
+        }
+
+        if (cacheRef.current.has(cacheKey)) {
+          setResults(cacheRef.current.get(cacheKey)!);
+          return;
+        }
+
+        setLoading(true);
+
+        try {
+          const res = await fetch('http://localhost:8000/search', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ latitude, longitude }),
+          });
+          const data = await res.json();
+          const resultData = data.results || [];
+
+          cacheRef.current.set(cacheKey, resultData);
+          localStorage.setItem(cacheKey, JSON.stringify({
+            timestamp: Date.now(),
+            data: resultData,
+          }));
+
+          setResults(resultData);
+        } catch (error) {
+          console.error('検索エラー', error);
+        } finally {
+          setLoading(false);
+        }
       },
-      (error) => {
-        console.error('位置情報エラー', error);
-      }
+      (error) => console.error('位置情報エラー', error)
     );
   };
 
   return (
-    <main className="p-4 max-w-md mx-auto">
-      <h1 className="text-2xl font-bold mb-4 text-center">近くの雀荘を探す</h1>
+    <main className="bg-gray-50 min-h-screen p-6">
+      <div className="max-w-2xl mx-auto">
+        <h1 className="text-3xl font-bold text-gray-800 text-center mb-6">近くの雀荘を探す</h1>
 
-      <div className="flex justify-center mb-6">
-        <button
-          onClick={handleGetLocation}
-          className="bg-blue-500 text-white px-6 py-2 rounded-lg hover:bg-blue-600 disabled:bg-blue-300"
-          disabled={isLoading}
-        >
-          {isLoading ? '検索中...' : '現在地から探す'}
-        </button>
-      </div>
+        <div className="flex justify-center mb-8">
+          <button
+            onClick={handleGetLocation}
+            disabled={loading}
+            className="bg-blue-600 text-white font-semibold px-6 py-3 rounded-lg shadow-md hover:bg-blue-700 disabled:bg-blue-300 transition"
+          >
+            {loading ? '検索中...' : '現在地から探す'}
+          </button>
+        </div>
 
-      {error && (
-        <p className="text-red-500 text-center mb-4">エラーが発生しました！再試行してください。</p>
-      )}
+        <div className="space-y-6">
+          {results.map((place, index) => {
+            const googleMapsUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(place.name + ' ' + place.address)}`;
 
-      <div className="flex flex-col gap-6">
-        {results && results.map((place: any, index: number) => {
-          const googleMapsUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(place.name + ' ' + place.address)}`;
+            const distanceKm = place.distanceKm ?? null;
+            const walkMinutes = place.walkMinutes ?? null;
+            const smokingStatus = place.smoking_status ?? null;
 
-          // 距離・徒歩分数計算
-          const distance = location && place.lat && place.lng
-            ? calculateDistance(location.latitude, location.longitude, place.lat, place.lng)
-            : null;
-          const walkingMinutes = distance ? Math.round(distance * 60 / 4) : null;
+            return (
+              <div key={index} className="border-b border-gray-300 pb-6 mb-6">
+                <a href={googleMapsUrl} target="_blank" rel="noopener noreferrer" className="text-xl font-bold text-blue-600 hover:underline">
+                  {place.name}
+                </a>
 
-          return (
-            <div key={index} className="p-4 bg-white border border-gray-200 rounded-2xl shadow-md">
-              <a
-                href={googleMapsUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-xl font-bold text-blue-600 hover:underline"
-              >
-                {place.name}
-              </a>
+                <p className="text-sm text-gray-500 mt-1">{place.address}</p>
 
-              <p className="text-gray-600 text-sm mt-1">{place.address}</p>
+                {/* 距離 */}
+                {distanceKm !== null && (
+                  <p className="text-sm text-gray-500 mt-2">
+                    📍 現在地から {distanceKm.toFixed(1)} km
+                    {walkMinutes && <>（徒歩{walkMinutes}分）</>}
+                  </p>
+                )}
 
-              {/* 距離と徒歩分数 */}
-              {distance !== null && (
-                <p className="text-gray-600 text-sm mt-1">
-                  📍 現在地から {distance.toFixed(1)} km
-                  {walkingMinutes !== null && `（徒歩${walkingMinutes}分）`}
-                </p>
-              )}
+                {/* 喫煙情報 */}
+                {smokingStatus && (
+                  <div className="mt-3 inline-flex items-center gap-2 text-sm font-medium">
+                    {smokingStatus === '禁煙' && <span className="px-2 py-1 bg-green-100 text-green-800 rounded-full">🚭 禁煙</span>}
+                    {smokingStatus === '喫煙可' && <span className="px-2 py-1 bg-red-100 text-red-600 rounded-full">🔥 喫煙可</span>}
+                    {smokingStatus === '情報なし' && <span className="px-2 py-1 bg-gray-200 text-gray-600 rounded-full">❓ 情報なし</span>}
+                  </div>
+                )}
 
-              {/* 喫煙情報 */}
-              {place.smoking && (
-                <div className="mt-2 inline-flex items-center gap-1 text-sm text-white px-2 py-1 rounded-full
-                  bg-green-500 dark:bg-green-600" // 禁煙
-                  style={{
-                    backgroundColor:
-                      place.smoking === '禁煙' ? '#4ade80' : // green-400
-                      place.smoking === '分煙' ? '#facc15' : // yellow-400
-                      place.smoking === '喫煙可' ? '#f87171' : // red-400
-                      '#9ca3af' // gray-400 for 情報なし
-                  }}
-                >
-                  {place.smoking === '禁煙' && <>🚭 禁煙</>}
-                  {place.smoking === '分煙' && <>🚬 分煙</>}
-                  {place.smoking === '喫煙可' && <>🔥 喫煙可</>}
-                  {place.smoking === '情報なし' && <>❓ 情報なし</>}
+                {/* レーティング */}
+                <div className="flex items-center gap-2 mt-3 text-sm text-gray-700">
+                  ⭐ {place.rating}（{place.user_ratings_total}件）
+                  {place.positive_score >= 80 && (
+                    <span className="ml-2 text-yellow-500">🌟おすすめ</span>
+                  )}
                 </div>
-              )}
 
-              {/* 星評価 */}
-              <div className="flex items-center gap-2 text-sm mt-2">
-                <span className="text-gray-800">⭐ {place.rating}（{place.user_ratings_total}件）</span>
+                {/* ポジネガスコア */}
+                {(place.positive_score !== null && place.negative_score !== null) && (
+                  <div className="text-sm text-gray-500 mt-2">
+                    ポジティブ度: {place.positive_score}% / ネガティブ度: {place.negative_score}%
+                  </div>
+                )}
 
-                {/* おすすめマーク */}
-                {place.positive_score >= 80 && (
-                  <span className="ml-2 text-yellow-500 text-lg">🌟おすすめ</span>
+                {/* 要約 */}
+                {place.summary && (
+                  <p className="text-gray-700 text-sm mt-4 leading-relaxed">
+                    {place.summary}
+                  </p>
                 )}
               </div>
-
-              {/* ポジティブ・ネガティブスコア */}
-              {(place.positive_score !== null && place.negative_score !== null) && (
-                <div className="text-gray-700 text-sm mt-2">
-                  ポジティブ度: {place.positive_score}% / ネガティブ度: {place.negative_score}%
-                </div>
-              )}
-
-              {/* 要約 */}
-              {place.summary && (
-                <p className="text-gray-800 text-sm mt-3">{place.summary}</p>
-              )}
-            </div>
-          );
-        })}
+            );
+          })}
+        </div>
       </div>
     </main>
   );
