@@ -27,7 +27,7 @@ class GoogleMapsService:
         reviews = details.get("result", {}).get("reviews", [])
         return [r.get("text", "") for r in reviews[:5]]  # 最初の5レビューだけ使用
 
-    def get_smoking_status(self, name: str, address: str) -> str:
+    async def get_smoking_status(self, name: str, address: str) -> str:
         urls = self._search_google_places(f"{name} {address} 雀荘 禁煙")
         texts = []
         for url in urls:
@@ -37,8 +37,15 @@ class GoogleMapsService:
 
         combined_text = "\n".join(texts)
         if combined_text:
-            return self.text_analyzer.analyze_smoking_info(combined_text)
+            return await self.text_analyzer.analyze_smoking_info(combined_text)
         return "情報なし"
+
+    def search_nearby_places_by_keyword(self, keyword: str) -> dict:
+        response = self.client.places(
+            query=keyword,
+            language="ja"
+        )
+        return response
 
     def _search_google_places(self, query: str) -> List[str]:
         url = "https://google.serper.dev/search"

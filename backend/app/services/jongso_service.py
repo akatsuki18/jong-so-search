@@ -4,6 +4,7 @@ from ..models.schemas import JongsoShop
 from .google_maps_service import GoogleMapsService
 from .sentiment_service import SentimentService
 from ..repositories.jongso_repository import JongsoRepository
+from uuid import uuid4
 
 class JongsoService:
     def __init__(
@@ -46,14 +47,14 @@ class JongsoService:
 
             # 口コミ取得と感情分析
             reviews = self.google_maps_service.get_place_reviews(place_id)
-            sentiment_result = self.sentiment_service.analyze_reviews(reviews)
+            sentiment_result = await self.sentiment_service.analyze_reviews(reviews)
 
             # 禁煙情報取得
-            smoking_status = self.google_maps_service.get_smoking_status(name, address)
+            smoking_status = await self.google_maps_service.get_smoking_status(name, address)
 
             # 新規データ保存
             shop_data = {
-                "id": place_id,
+                "id": str(uuid4()),
                 "name": name,
                 "address": address,
                 "lat": lat,
@@ -61,9 +62,9 @@ class JongsoService:
                 "rating": rating,
                 "user_ratings_total": user_ratings_total,
                 "smoking_status": smoking_status,
-                "positive_score": sentiment_result.get("positive_score"),
-                "negative_score": sentiment_result.get("negative_score"),
-                "summary": sentiment_result.get("summary"),
+                "positive_score": sentiment_result["positive_score"] if sentiment_result else None,
+                "negative_score": sentiment_result["negative_score"] if sentiment_result else None,
+                "summary": sentiment_result["summary"] if sentiment_result else None,
                 "last_fetched_at": datetime.utcnow()
             }
 
@@ -75,14 +76,56 @@ class JongsoService:
         return self._sort_results(results)
 
     async def search_shops_by_keyword(self, keyword: str) -> List[Dict[str, Any]]:
+        # まずDBから検索
         results = await self.jongso_repository.search_by_keyword(keyword)
 
-        formatted_results = [
-            self._format_shop_data(shop)
-            for shop in results
-        ]
+        if results:
+            # データがあるならそのまま整形して返す
+            formatted_results = [self._format_shop_data(shop) for shop in results]
+            return self._sort_results(formatted_results)
 
-        return self._sort_results(formatted_results)
+        # ここから "Google Mapsに検索をかける" パート
+        print(f"DBに存在しなかったため、Google検索を試みます: {keyword}")
+        places_result = self.google_maps_service.search_nearby_places_by_keyword(keyword)
+
+        fetched_results = []
+        for place in places_result.get("results", []):
+            name = place.get("name", "")
+            address = place.get("vicinity", "")
+            rating = place.get("rating", 0)
+            user_ratings_total = place.get("user_ratings_total", 0)
+            place_id = place.get("place_id", "")
+            location = place.get("geometry", {}).get("location", {})
+            lat = location.get("lat")
+            lng = location.get("lng")
+
+            # 口コミ取得＆感情分析
+            reviews = self.google_maps_service.get_place_reviews(place_id)
+            sentiment_result = await self.sentiment_service.analyze_reviews(reviews)
+
+            # 禁煙情報取得
+            smoking_status = await self.google_maps_service.get_smoking_status(name, address)
+
+            # DB登録
+            shop_data = {
+                "id": str(uuid4()),
+                "name": name,
+                "address": address,
+                "lat": lat,
+                "lng": lng,
+                "rating": rating,
+                "user_ratings_total": user_ratings_total,
+                "smoking_status": smoking_status,
+                "positive_score": sentiment_result["positive_score"],
+                "negative_score": sentiment_result["negative_score"],
+                "summary": sentiment_result["summary"],
+                "last_fetched_at": datetime.utcnow()
+            }
+            await self.jongso_repository.create(shop_data)
+
+            fetched_results.append(self._format_shop_data(shop_data))
+
+        return self._sort_results(fetched_results)
 
     def _format_shop_data(self, shop: Dict[str, Any]) -> Dict[str, Any]:
         return {

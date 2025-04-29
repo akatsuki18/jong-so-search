@@ -22,11 +22,11 @@ class TextAnalyzer:
 {page_text}
 """)
 
-    def analyze_smoking_info(self, page_text: str) -> str:
+    async def analyze_smoking_info(self, page_text: str) -> str:
         try:
-            response = self.llm.invoke({
-                "page_text": page_text,
-            })
+            response = await self.llm.ainvoke(
+                self.smoking_prompt.format(page_text=page_text)
+            )
             lines = response.content.splitlines()
             smoking_status = None
 

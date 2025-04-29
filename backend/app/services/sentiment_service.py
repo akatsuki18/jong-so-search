@@ -21,10 +21,10 @@ class SentimentService:
 ネガティブ度: （半角数字のみ、%はつける）
 
 レビュー:
-{reviews}
+{combined_reviews}
 """)
 
-    def analyze_reviews(self, reviews: List[str]) -> Dict[str, Any]:
+    async def analyze_reviews(self, reviews: List[str]) -> Dict[str, Any]:
         if not reviews:
             return {
                 "summary": "",
@@ -34,10 +34,9 @@ class SentimentService:
 
         combined_reviews = "\n".join(reviews)
         try:
-            response = self.llm.invoke({
-                "genre": "雀荘",
-                "reviews": combined_reviews,
-            })
+            response = await self.llm.ainvoke(
+                self.prompt.format(genre="雀荘", combined_reviews=combined_reviews)
+            )
 
             lines = response.content.splitlines()
             summary = ""
