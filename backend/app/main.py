@@ -2,9 +2,8 @@
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.models.schemas import Location, SearchResponse
 from app.routers.jongso_router import jongso_router
-from app.dependencies import jongso_service, jongso_repository
+from app.dependencies import jongso_repository
 
 app = FastAPI()
 
@@ -28,12 +27,3 @@ async def startup():
 @app.on_event("shutdown")
 async def shutdown():
     await jongso_repository.disconnect()
-
-# 現在地検索API
-@app.post("/search", response_model=SearchResponse)
-async def search_jongso(location: Location):
-    results = await jongso_service.search_nearby_shops(
-        latitude=location.latitude,
-        longitude=location.longitude
-    )
-    return {"results": results}
