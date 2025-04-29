@@ -4,16 +4,42 @@ from pydantic import BaseModel
 from langchain_openai import ChatOpenAI
 from langchain.prompts import ChatPromptTemplate
 from bs4 import BeautifulSoup
+from databases import Database
+from sqlalchemy import create_engine, MetaData, Table, Column, String, Integer, Numeric, Text, DateTime
 import googlemaps
 import requests
 import os
 from dotenv import load_dotenv
+import uuid
+from datetime import datetime, timedelta, timezone
 
 load_dotenv()
 # 環境変数からOpenAI APIキーを取得
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 CHAT_MODEL = os.getenv("CHAT_MODEL")
 SERPER_API_KEY = os.getenv("SERPER_API_KEY")
+DATABASE_URL = os.getenv("DATABASE_URL")
+
+database = Database(DATABASE_URL)
+metadata = MetaData()
+
+# テーブル定義（SQLAlchemy）
+jongso_shops = Table(
+    "jongso_shops",
+    metadata,
+    Column("id", String, primary_key=True),
+    Column("name", Text, nullable=False),
+    Column("address", Text),
+    Column("lat", Numeric(10, 6)),
+    Column("lng", Numeric(10, 6)),
+    Column("rating", Numeric(2, 1)),
+    Column("user_ratings_total", Integer),
+    Column("smoking_status", Text),
+    Column("positive_score", Integer),
+    Column("negative_score", Integer),
+    Column("summary", Text),
+    Column("last_fetched_at", DateTime(timezone=True)),
+)
 
 llm = ChatOpenAI(
     openai_api_key=OPENAI_API_KEY,
@@ -40,13 +66,17 @@ class Location(BaseModel):
 # Google Maps APIクライアント初期化
 gmaps = googlemaps.Client(key=GOOGLE_MAPS_API_KEY)
 
-@app.get("/")
-def read_root():
-    return {"message": "Hello World"}
+@app.on_event("startup")
+async def startup():
+    await database.connect()
+
+@app.on_event("shutdown")
+async def shutdown():
+    await database.disconnect()
 
 # 口コミも取得するバージョン
 @app.post("/search")
-def search_jongso(location: Location):
+async def search_jongso(location: Location):
     places_result = gmaps.places_nearby(
         location=(location.latitude, location.longitude),
         radius=3000,
@@ -56,12 +86,38 @@ def search_jongso(location: Location):
     )
 
     results = []
+    thirty_days_ago = datetime.now(timezone.utc) - timedelta(days=30)
+
     for place in places_result.get("results", []):
         name = place.get("name", "")
         address = place.get("vicinity", "")
         rating = place.get("rating", 0)
         user_ratings_total = place.get("user_ratings_total", 0)
         place_id = place.get("place_id", "")
+
+        # 既存チェック
+        query = jongso_shops.select().where(jongso_shops.c.name == name)
+        existing = await database.fetch_one(query)
+
+        if existing and existing["last_fetched_at"] and existing["last_fetched_at"] > thirty_days_ago:
+            print(f"✅ DBから取得: {name}")
+            results.append({
+                "name": existing["name"],
+                "address": existing["address"],
+                "lat": float(existing["lat"]),
+                "lng": float(existing["lng"]),
+                "rating": float(existing["rating"]) if existing["rating"] else None,
+                "user_ratings_total": existing["user_ratings_total"],
+                "summary": existing["summary"],
+                "positive_score": existing["positive_score"],
+                "negative_score": existing["negative_score"],
+                "smoking": existing["smoking_status"],
+            })
+            continue
+
+        location = place.get("geometry", {}).get("location", {})
+        lat = location.get("lat")
+        lng = location.get("lng")
 
         # 口コミ取得
         details = gmaps.place(
@@ -130,9 +186,23 @@ def search_jongso(location: Location):
             except Exception as e:
                 print(f"禁煙判定エラー: {e}")
 
-        location = place.get("geometry", {}).get("location", {})
-        lat = location.get("lat")
-        lng = location.get("lng")
+        if not existing:
+            # 登録する
+            insert_query = jongso_shops.insert().values(
+                id=str(uuid.uuid4()),
+                name=name,
+                address=address,
+                lat=lat,
+                lng=lng,
+                rating=rating,
+                user_ratings_total=user_ratings_total,
+                smoking_status=smoking_judgement,  # ← 禁煙判定したやつ
+                positive_score=positive_score,
+                negative_score=negative_score,
+                summary=summary,
+                last_fetched_at=datetime.utcnow()
+            )
+            await database.execute(insert_query)
 
         results.append({
             "name": name,
