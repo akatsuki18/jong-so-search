@@ -31,10 +31,6 @@ class JongsoRepository:
     async def disconnect(self):
         await self.database.disconnect()
 
-    async def get_by_name(self, name: str) -> Optional[Dict[str, Any]]:
-        query = self.jongso_shops.select().where(self.jongso_shops.c.name == name)
-        return await self.database.fetch_one(query)
-
     async def get_by_name_and_address(self, name: str, address: str):
         query = self.jongso_shops.select().where(
             and_(
