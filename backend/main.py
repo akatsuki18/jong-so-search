@@ -116,11 +116,17 @@ def search_jongso(location: Location):
             except Exception as e:
                 print(f"Sentiment analysis error: {e}")
 
+        location = place.get("geometry", {}).get("location", {})
+        lat = location.get("lat")
+        lng = location.get("lng")
+
         results.append({
             "name": name,
             "address": address,
             "rating": rating,
             "user_ratings_total": user_ratings_total,
+            "lat": lat,
+            "lng": lng,
             "summary": summary,
             "positive_score": positive_score,
             "negative_score": negative_score
