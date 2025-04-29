@@ -2,6 +2,7 @@ from typing import Optional, Dict, Any
 from databases import Database
 from sqlalchemy import Table, MetaData, Column, String, Integer, Numeric, Text, DateTime
 from ..config import settings
+from sqlalchemy import and_, or_
 
 class JongsoRepository:
     def __init__(self):
@@ -33,6 +34,24 @@ class JongsoRepository:
     async def get_by_name(self, name: str) -> Optional[Dict[str, Any]]:
         query = self.jongso_shops.select().where(self.jongso_shops.c.name == name)
         return await self.database.fetch_one(query)
+
+    async def get_by_name_and_address(self, name: str, address: str):
+        query = self.jongso_shops.select().where(
+            and_(
+                self.jongso_shops.c.name == name,
+                self.jongso_shops.c.address == address,
+            )
+        )
+        return await self.database.fetch_one(query)
+
+    async def search_by_keyword(self, keyword: str):
+        query = self.jongso_shops.select().where(
+            or_(
+                self.jongso_shops.c.name.ilike(f"%{keyword}%"),
+                self.jongso_shops.c.address.ilike(f"%{keyword}%"),
+            )
+        )
+        return await self.database.fetch_all(query)
 
     async def create(self, shop_data: Dict[str, Any]) -> None:
         query = self.jongso_shops.insert().values(**shop_data)

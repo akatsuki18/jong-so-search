@@ -33,7 +33,7 @@ class JongsoService:
             place_id = place.get("place_id", "")
 
             # 既存チェック
-            existing = await self.jongso_repository.get_by_name(name)
+            existing = await self.jongso_repository.get_by_name_and_address(name, address)
 
             if existing and existing.last_fetched_at > thirty_days_ago:
                 results.append(self._format_shop_data(existing))
@@ -73,6 +73,16 @@ class JongsoService:
             results.append(self._format_shop_data(shop_data))
 
         return self._sort_results(results)
+
+    async def search_shops_by_keyword(self, keyword: str) -> List[Dict[str, Any]]:
+        results = await self.jongso_repository.search_by_keyword(keyword)
+
+        formatted_results = [
+            self._format_shop_data(shop)
+            for shop in results
+        ]
+
+        return self._sort_results(formatted_results)
 
     def _format_shop_data(self, shop: Dict[str, Any]) -> Dict[str, Any]:
         return {
