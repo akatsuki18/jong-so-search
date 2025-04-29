@@ -53,6 +53,7 @@ class JongsoService:
 
             # 新規データ保存
             shop_data = {
+                "id": place_id,
                 "name": name,
                 "address": address,
                 "lat": lat,
@@ -75,6 +76,7 @@ class JongsoService:
 
     def _format_shop_data(self, shop: Dict[str, Any]) -> Dict[str, Any]:
         return {
+            "id": str(shop["id"]) if "id" in shop else "",
             "name": shop["name"],
             "address": shop["address"],
             "lat": float(shop["lat"]),
@@ -84,7 +86,8 @@ class JongsoService:
             "summary": shop["summary"],
             "positive_score": shop["positive_score"],
             "negative_score": shop["negative_score"],
-            "smoking": shop["smoking_status"],
+            "smoking_status": shop["smoking_status"],
+            "last_fetched_at": shop["last_fetched_at"],
         }
 
     def _sort_results(self, results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
