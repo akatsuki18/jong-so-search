@@ -24,44 +24,81 @@ const fetcher = (url: string, body: any) =>
     body: JSON.stringify(body),
   }).then((res) => res.json());
 
+const keywordFetcher = (url: string) =>
+  fetch(url).then((res) => res.json());
+
 export default function Home() {
   const [coords, setCoords] = useState<{ latitude: number; longitude: number } | null>(null);
+  const [keyword, setKeyword] = useState<string>('');
+  const [searchKeyword, setSearchKeyword] = useState<string>('');
 
-  const { data, error, isLoading } = useSWR(
+  const { data: locationData, error: locationError, isLoading: locationIsLoading } = useSWR(
     coords ? ['/search', coords] : null,
     ([url, coords]) => fetcher('http://localhost:8000/search', coords),
-    { revalidateOnFocus: false } // フォーカス時に再フェッチしない
+    { revalidateOnFocus: false }
   );
 
-  const results = data?.results || [];
+  const { data: keywordData, error: keywordError, isLoading: keywordIsLoading } = useSWR(
+    searchKeyword ? `http://localhost:8000/search_by_keyword?keyword=${encodeURIComponent(searchKeyword)}` : null,
+    keywordFetcher,
+    { revalidateOnFocus: false }
+  );
+
+  const results = searchKeyword ? (keywordData?.results || []) : (locationData?.results || []);
 
   const handleGetLocation = () => {
     navigator.geolocation.getCurrentPosition(
       (position) => {
         const { latitude, longitude } = position.coords;
         setCoords({ latitude, longitude });
+        setSearchKeyword(''); // 位置情報検索時はキーワード検索をリセット
       },
       (error) => console.error('位置情報エラー', error)
     );
   };
 
+  const handleKeywordSearch = (e: React.FormEvent) => {
+    e.preventDefault();
+    setSearchKeyword(keyword);
+    setCoords(null); // キーワード検索時は位置情報をリセット
+  };
+
   return (
     <main className="bg-gray-50 min-h-screen p-6">
       <div className="max-w-2xl mx-auto">
-        <h1 className="text-3xl font-bold text-gray-800 text-center mb-6">近くの雀荘を探す</h1>
+        <h1 className="text-3xl font-bold text-gray-800 text-center mb-6">雀荘を探す</h1>
 
-        <div className="flex justify-center mb-8">
-          <button
-            onClick={handleGetLocation}
-            disabled={isLoading}
-            className="bg-blue-600 text-white font-semibold px-6 py-3 rounded-lg shadow-md hover:bg-blue-700 disabled:bg-blue-300 transition"
-          >
-            {isLoading ? '検索中...' : '現在地から探す'}
-          </button>
+        <div className="flex flex-col gap-4 mb-8">
+          <form onSubmit={handleKeywordSearch} className="flex gap-2">
+            <input
+              type="text"
+              value={keyword}
+              onChange={(e) => setKeyword(e.target.value)}
+              placeholder="店名や住所で検索"
+              className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-700"
+            />
+            <button
+              type="submit"
+              disabled={keywordIsLoading}
+              className="bg-blue-600 text-white font-semibold px-6 py-2 rounded-lg shadow-md hover:bg-blue-700 disabled:bg-blue-300 transition"
+            >
+              {keywordIsLoading ? '検索中...' : '検索'}
+            </button>
+          </form>
+
+          <div className="flex justify-center">
+            <button
+              onClick={handleGetLocation}
+              disabled={locationIsLoading}
+              className="bg-green-600 text-white font-semibold px-6 py-3 rounded-lg shadow-md hover:bg-green-700 disabled:bg-green-300 transition"
+            >
+              {locationIsLoading ? '検索中...' : '現在地から探す'}
+            </button>
+          </div>
         </div>
 
         <div className="space-y-6">
-          {error && <p className="text-red-500">エラーが発生しました。</p>}
+          {(locationError || keywordError) && <p className="text-red-500">エラーが発生しました。</p>}
           {results.map((place: Place, index: number) => {
             const googleMapsUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(place.name + ' ' + place.address)}`;
 
