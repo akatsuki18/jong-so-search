@@ -3,6 +3,20 @@
 import { useState } from 'react';
 import useSWR from 'swr';
 
+interface Place {
+  name: string;
+  address: string;
+  distanceKm?: number;
+  walkMinutes?: number;
+  smoking_status?: string;
+  smoking?: string;
+  rating: number;
+  user_ratings_total: number;
+  positive_score?: number;
+  negative_score?: number;
+  summary?: string;
+}
+
 const fetcher = (url: string, body: any) =>
   fetch(url, {
     method: 'POST',
@@ -48,7 +62,7 @@ export default function Home() {
 
         <div className="space-y-6">
           {error && <p className="text-red-500">エラーが発生しました。</p>}
-          {results.map((place, index) => {
+          {results.map((place: Place, index: number) => {
             const googleMapsUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(place.name + ' ' + place.address)}`;
 
             const distanceKm = place.distanceKm ?? null;
@@ -81,7 +95,7 @@ export default function Home() {
 
                 <div className="flex items-center gap-2 mt-3 text-sm text-gray-700">
                   ⭐ {place.rating}（{place.user_ratings_total}件）
-                  {place.positive_score >= 80 && (
+                  {place.positive_score !== undefined && place.positive_score >= 80 && (
                     <span className="ml-2 text-yellow-500">🌟おすすめ</span>
                   )}
                 </div>
