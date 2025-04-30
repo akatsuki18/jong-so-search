@@ -84,6 +84,10 @@ class JongsoService:
             formatted_results = [self._format_shop_data(shop) for shop in results]
             return self._sort_results(formatted_results)
 
+        print(f"DBから取得したデータの数: {len(results)}")
+        if len(results) > 10:
+            return formatted_results
+
         # ここから "Google Mapsに検索をかける" パート
         print(f"DBに存在しなかったため、Google検索を試みます: {keyword}")
         places_result = self.google_maps_service.search_nearby_places_by_keyword(keyword)
@@ -151,8 +155,10 @@ class JongsoService:
 
     def _calculate_adjusted_rating(self, place: Dict[str, Any]) -> float:
         base_rating = place["rating"]
-        positive_score = place.get("positive_score")
+        if base_rating is None:
+            return 0.0
 
+        positive_score = place.get("positive_score")
         if positive_score is not None:
             return base_rating + (positive_score / 100)
         return base_rating

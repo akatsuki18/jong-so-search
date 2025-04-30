@@ -19,6 +19,13 @@ class GoogleMapsService:
             language="ja"
         )
 
+    def search_nearby_places_by_keyword(self, keyword: str) -> dict:
+        return self.client.places(
+            query=f"{keyword} 麻雀",
+            max_results=10,
+            language="ja"
+        )
+
     def get_place_reviews(self, place_id: str) -> List[str]:
         details = self.client.place(
             place_id=place_id,
@@ -39,13 +46,6 @@ class GoogleMapsService:
         if combined_text:
             return await self.text_analyzer.analyze_smoking_info(combined_text)
         return "情報なし"
-
-    def search_nearby_places_by_keyword(self, keyword: str) -> dict:
-        response = self.client.places(
-            query=keyword,
-            language="ja"
-        )
-        return response
 
     def _search_google_places(self, query: str) -> List[str]:
         url = "https://google.serper.dev/search"
