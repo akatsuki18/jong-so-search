@@ -98,7 +98,7 @@ class JongsoService:
 
         # ここから "Google Mapsに検索をかける" パート
         print(f"DBに存在しなかったため、Google検索を試みます: {keyword}")
-        places_result = self.google_maps_service.search_nearby_places_by_keyword(keyword)
+        places_result = await self.google_maps_service.search_nearby_places_by_keyword(keyword)
 
         fetched_results = []
         for place in places_result.get("results", []):
@@ -112,7 +112,7 @@ class JongsoService:
             lng = location.get("lng")
 
             # 口コミ取得＆感情分析
-            reviews = self.google_maps_service.get_place_reviews(place_id)
+            reviews = await self.google_maps_service.get_place_reviews(place_id)
             sentiment_result = await self.sentiment_service.analyze_reviews(reviews)
 
             # 禁煙情報取得

@@ -34,7 +34,6 @@ class GoogleMapsService:
             partial(
                 self.client.places,
                 query=f"{keyword} 麻雀",
-                max_results=10,
                 language="ja"
             )
         )
