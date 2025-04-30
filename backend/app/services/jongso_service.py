@@ -18,62 +18,70 @@ class JongsoService:
         self.jongso_repository = jongso_repository
 
     async def search_nearby_shops(self, latitude: float, longitude: float) -> List[Dict[str, Any]]:
-        places_result = self.google_maps_service.search_nearby_places(
-            latitude=latitude,
-            longitude=longitude
-        )
+        try:
+            places_result = await self.google_maps_service.search_nearby_places(
+                latitude=latitude,
+                longitude=longitude
+            )
 
-        results = []
-        thirty_days_ago = datetime.now(timezone.utc) - timedelta(days=30)
+            results = []
+            thirty_days_ago = datetime.now(timezone.utc) - timedelta(days=30)
 
-        for place in places_result.get("results", []):
-            name = place.get("name", "")
-            address = place.get("vicinity", "")
-            rating = place.get("rating", 0)
-            user_ratings_total = place.get("user_ratings_total", 0)
-            place_id = place.get("place_id", "")
+            for place in places_result.get("results", []):
+                try:
+                    name = place.get("name", "")
+                    address = place.get("vicinity", "")
+                    rating = place.get("rating", 0)
+                    user_ratings_total = place.get("user_ratings_total", 0)
+                    place_id = place.get("place_id", "")
 
-            # 既存チェック
-            existing = await self.jongso_repository.get_by_name_and_address(name, address)
+                    # 既存チェック
+                    existing = await self.jongso_repository.get_by_name_and_address(name, address)
 
-            if existing and existing.last_fetched_at > thirty_days_ago:
-                results.append(self._format_shop_data(existing))
-                continue
+                    if existing and existing.last_fetched_at > thirty_days_ago:
+                        results.append(self._format_shop_data(existing))
+                        continue
 
-            # 新規データ取得
-            location = place.get("geometry", {}).get("location", {})
-            lat = location.get("lat")
-            lng = location.get("lng")
+                    # 新規データ取得
+                    location = place.get("geometry", {}).get("location", {})
+                    lat = location.get("lat")
+                    lng = location.get("lng")
 
-            # 口コミ取得と感情分析
-            reviews = self.google_maps_service.get_place_reviews(place_id)
-            sentiment_result = await self.sentiment_service.analyze_reviews(reviews)
+                    # 口コミ取得と感情分析
+                    reviews = await self.google_maps_service.get_place_reviews(place_id)
+                    sentiment_result = await self.sentiment_service.analyze_reviews(reviews)
 
-            # 禁煙情報取得
-            smoking_status = await self.google_maps_service.get_smoking_status(name, address)
+                    # 禁煙情報取得
+                    smoking_status = await self.google_maps_service.get_smoking_status(name, address)
 
-            # 新規データ保存
-            shop_data = {
-                "id": str(uuid4()),
-                "name": name,
-                "address": address,
-                "lat": lat,
-                "lng": lng,
-                "rating": rating,
-                "user_ratings_total": user_ratings_total,
-                "smoking_status": smoking_status,
-                "positive_score": sentiment_result["positive_score"] if sentiment_result else None,
-                "negative_score": sentiment_result["negative_score"] if sentiment_result else None,
-                "summary": sentiment_result["summary"] if sentiment_result else None,
-                "last_fetched_at": datetime.utcnow()
-            }
+                    # 新規データ保存
+                    shop_data = {
+                        "id": str(uuid4()),
+                        "name": name,
+                        "address": address,
+                        "lat": lat,
+                        "lng": lng,
+                        "rating": rating,
+                        "user_ratings_total": user_ratings_total,
+                        "smoking_status": smoking_status,
+                        "positive_score": sentiment_result["positive_score"] if sentiment_result else None,
+                        "negative_score": sentiment_result["negative_score"] if sentiment_result else None,
+                        "summary": sentiment_result["summary"] if sentiment_result else None,
+                        "last_fetched_at": datetime.utcnow()
+                    }
 
-            if not existing:
-                await self.jongso_repository.create(shop_data)
+                    if not existing:
+                        await self.jongso_repository.create(shop_data)
 
-            results.append(self._format_shop_data(shop_data))
+                    results.append(self._format_shop_data(shop_data))
+                except Exception as e:
+                    print(f"Error processing place {name}: {str(e)}")
+                    continue
 
-        return self._sort_results(results)
+            return self._sort_results(results)
+        except Exception as e:
+            print(f"Error in search_nearby_shops: {str(e)}")
+            raise
 
     async def search_shops_by_keyword(self, keyword: str) -> List[Dict[str, Any]]:
         # まずDBから検索

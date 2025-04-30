@@ -1,53 +1,70 @@
 import googlemaps
+import aiohttp
 from typing import List, Dict, Any
 from ..config import settings
 from ..utils.text_analyzer import TextAnalyzer
 import requests
 from bs4 import BeautifulSoup
+import asyncio
+from functools import partial
 
 class GoogleMapsService:
     def __init__(self):
         self.client = googlemaps.Client(key=settings.GOOGLE_MAPS_API_KEY)
         self.text_analyzer = TextAnalyzer()
 
-    def search_nearby_places(self, latitude: float, longitude: float) -> Dict[str, Any]:
-        return self.client.places_nearby(
-            location=(latitude, longitude),
-            radius=3000,
-            keyword="麻雀",
-            type="establishment",
-            language="ja"
+    async def search_nearby_places(self, latitude: float, longitude: float) -> Dict[str, Any]:
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(
+            None,
+            partial(
+                self.client.places_nearby,
+                location=(latitude, longitude),
+                radius=3000,
+                keyword="麻雀",
+                type="establishment",
+                language="ja"
+            )
         )
 
-    def search_nearby_places_by_keyword(self, keyword: str) -> dict:
-        return self.client.places(
-            query=f"{keyword} 麻雀",
-            max_results=10,
-            language="ja"
+    async def search_nearby_places_by_keyword(self, keyword: str) -> dict:
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(
+            None,
+            partial(
+                self.client.places,
+                query=f"{keyword} 麻雀",
+                max_results=10,
+                language="ja"
+            )
         )
 
-    def get_place_reviews(self, place_id: str) -> List[str]:
-        details = self.client.place(
-            place_id=place_id,
-            language="ja"
+    async def get_place_reviews(self, place_id: str) -> List[str]:
+        loop = asyncio.get_event_loop()
+        details = await loop.run_in_executor(
+            None,
+            partial(
+                self.client.place,
+                place_id=place_id,
+                language="ja"
+            )
         )
         reviews = details.get("result", {}).get("reviews", [])
         return [r.get("text", "") for r in reviews[:5]]  # 最初の5レビューだけ使用
 
     async def get_smoking_status(self, name: str, address: str) -> str:
-        urls = self._search_google_places(f"{name} {address} 雀荘 禁煙")
+        urls = await self._search_google_places(f"{name} {address} 雀荘 禁煙")
         texts = []
-        for url in urls:
-            page_text = self._fetch_page_text(url)
-            if page_text:
-                texts.append(page_text)
+        async with aiohttp.ClientSession() as session:
+            tasks = [self._fetch_page_text(session, url) for url in urls]
+            texts = await asyncio.gather(*tasks)
 
-        combined_text = "\n".join(texts)
+        combined_text = "\n".join([text for text in texts if text])
         if combined_text:
             return await self.text_analyzer.analyze_smoking_info(combined_text)
         return "情報なし"
 
-    def _search_google_places(self, query: str) -> List[str]:
+    async def _search_google_places(self, query: str) -> List[str]:
         url = "https://google.serper.dev/search"
         payload = {
             "q": query,
@@ -59,19 +76,21 @@ class GoogleMapsService:
             "Content-Type": "application/json"
         }
 
-        response = requests.post(url, headers=headers, json=payload)
-        if response.status_code == 200:
-            data = response.json()
-            return [item.get('link') for item in data.get('organic', [])[:3]]
+        async with aiohttp.ClientSession() as session:
+            async with session.post(url, headers=headers, json=payload) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    return [item.get('link') for item in data.get('organic', [])[:3]]
         return []
 
-    def _fetch_page_text(self, url: str) -> str:
+    async def _fetch_page_text(self, session: aiohttp.ClientSession, url: str) -> str:
         try:
-            response = requests.get(url, timeout=5)
-            if response.status_code == 200:
-                soup = BeautifulSoup(response.text, 'html.parser')
-                return soup.get_text(separator="\n", strip=True)
-            return ""
+            async with session.get(url, timeout=aiohttp.ClientTimeout(total=5)) as response:
+                if response.status == 200:
+                    text = await response.text()
+                    soup = BeautifulSoup(text, 'html.parser')
+                    return soup.get_text(separator="\n", strip=True)
+                return ""
         except Exception as e:
             print(f"クロールエラー: {url}, {e}")
             return ""
