@@ -22,7 +22,7 @@ class SentimentAnalysisService:
                 temperature=0,
                 model=chat_model,
             )
-        self.prompt = ChatPromptTemplate.from_template("""
+        self.sentiment_prompt = ChatPromptTemplate.from_template("""
 あなたは{genre}の専門家です。
 
 以下のレビューを読み、以下のフォーマットに厳密に従って要約とスコアリングをしてください。
@@ -36,6 +36,27 @@ class SentimentAnalysisService:
 レビュー:
 {combined_reviews}
 """)
+
+        # --- 喫煙状況分析用プロンプトを追加 ---
+        self.smoking_prompt = ChatPromptTemplate.from_template("""
+あなたは以下の日本の雀荘に関するレビューを読む専門家です。
+レビュー全体の文脈を考慮し、この雀荘の喫煙状況を最も適切に表すものを、以下の選択肢の中から**一つだけ**選んでください。
+
+選択肢:
+- 禁煙 (完全に禁煙されている場合)
+- 分煙 (喫煙エリアと禁煙エリアが分かれている、またはそのように試みられている場合。例：「禁煙席もある」「分煙だが煙が流れてくる」など)
+- 喫煙可 (特に制限がない、または喫煙に関する苦情が多い場合)
+- 情報なし (レビューから喫煙状況が判断できない場合)
+
+注意点:
+- 「禁煙」という単語があっても、レビュー全体で煙の匂いや流れ込みに関する不満が述べられている場合は「分煙」または「喫煙可」と判断してください。
+- 単に「タバコ」や「煙」という単語があるだけでは判断せず、それが許可されている状況か、問題となっている状況かを考慮してください。
+- 最終的な回答は、選択肢の中の文字列**一つだけ**にしてください。余計な説明は不要です。
+
+レビュー:
+{combined_reviews}
+""")
+        # -------------------------------------\n
 
     async def analyze_reviews(self, reviews: List[str]) -> Dict[str, Any]:
         if not self.llm:
@@ -51,7 +72,7 @@ class SentimentAnalysisService:
         logger.info(f"感情分析実行: レビュー数={len(reviews)}, 文字数={len(combined_reviews)}")
         try:
             response = await self.llm.ainvoke(
-                self.prompt.format(genre="雀荘", combined_reviews=combined_reviews)
+                self.sentiment_prompt.format(genre="雀荘", combined_reviews=combined_reviews)
             )
             content = response.content
             logger.info(f"感情分析 応答: {content}")
@@ -61,9 +82,9 @@ class SentimentAnalysisService:
             positive_score = None
             negative_score = None
 
-            logger.debug("LLMレスポンスのパース開始")
+            logger.debug("感情分析レスポンスのパース開始")
             for line in lines:
-                logger.debug(f"パース中の行: {line}")
+                logger.debug(f"パース中の行(感情): {line}")
                 if "要約:" in line:
                     summary = line.split("要約:")[-1].strip()
                     logger.debug(f"  -> 要約抽出: {summary}")
@@ -87,7 +108,7 @@ class SentimentAnalysisService:
                             logger.warning(f"ネガティブ度の値が数字ではありません: '{score_str}' (元行: {line})")
                     except Exception as parse_e:
                         logger.warning(f"ネガティブ度のパース中にエラー: {parse_e} (元行: {line})")
-            logger.debug("LLMレスポンスのパース完了")
+            logger.debug("感情分析レスポンスのパース完了")
 
             if not summary:
                 summary = "情報なし"
@@ -99,6 +120,41 @@ class SentimentAnalysisService:
         except Exception as e:
             logger.error(f"感情分析API呼び出しエラー: {e}", exc_info=True)
             return {"summary": "分析エラー", "positive_score": None, "negative_score": None}
+
+    # --- 喫煙状況分析メソッドを追加 ---
+    async def analyze_smoking_status(self, reviews: List[str]) -> str:
+        """レビューから喫煙状況を分析する"""
+        if not self.llm:
+            return "情報なし" # APIキーがない
+
+        if not reviews:
+            return "情報なし" # レビューがない
+
+        combined_reviews = "\n".join(reviews)
+        if len(combined_reviews) > 3000:
+            combined_reviews = combined_reviews[:3000]
+
+        logger.info(f"喫煙状況分析実行: レビュー数={len(reviews)}, 文字数={len(combined_reviews)}")
+        try:
+            response = await self.llm.ainvoke(
+                self.smoking_prompt.format(combined_reviews=combined_reviews) # 喫煙状況用プロンプトを使用
+            )
+            result_text = response.content.strip()
+            logger.info(f"喫煙状況分析 応答: {result_text}")
+
+            # 応答が選択肢のいずれかに合致するか確認
+            valid_statuses = ["禁煙", "分煙", "喫煙可", "情報なし"]
+            if result_text in valid_statuses:
+                logger.info(f"喫煙状況分析結果: {result_text}")
+                return result_text
+            else:
+                logger.warning(f"喫煙状況分析の応答が予期せぬ形式です: '{result_text}'. '情報なし'として扱います。")
+                return "情報なし" # 予期せぬ応答の場合はデフォルト
+
+        except Exception as e:
+            logger.error(f"喫煙状況分析API呼び出しエラー: {e}", exc_info=True)
+            return "情報なし" # エラー時もデフォルト
+    # ----------------------------------\n
 
 class GoogleMapsService:
     def __init__(self, api_key: str):
@@ -201,9 +257,17 @@ class LocationService:
         logger.info(f"店舗処理開始: {name} (place_id={place_id})")
 
         try:
+            # 口コミ取得 (並列化も可能だが、ここでは逐次)
             reviews = await self.google_maps_service.get_place_reviews(place_id)
 
-            sentiment_result = await self.sentiment_service.analyze_reviews(reviews)
+            # 感情分析と喫煙状況分析を並列実行
+            sentiment_task = self.sentiment_service.analyze_reviews(reviews)
+            smoking_task = self.sentiment_service.analyze_smoking_status(reviews)
+
+            sentiment_result, smoking_status_result = await asyncio.gather(
+                sentiment_task,
+                smoking_task
+            )
 
             address = place.get("vicinity", "")
             rating = place.get("rating", 0)
@@ -223,8 +287,9 @@ class LocationService:
                 "positive_score": sentiment_result["positive_score"],
                 "negative_score": sentiment_result["negative_score"],
                 "summary": sentiment_result["summary"],
+                "smoking_status": smoking_status_result # AIによる判定結果で上書き
             }
-            logger.info(f"店舗処理完了: {name}")
+            logger.info(f"店舗処理完了: {name} - Sentiment: P{sentiment_result['positive_score']} N{sentiment_result['negative_score']}, Smoking: {smoking_status_result}")
             return shop_data
 
         except Exception as e:
