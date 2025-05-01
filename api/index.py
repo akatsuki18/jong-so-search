@@ -6,7 +6,7 @@ import logging
 
 # モデルをインポート（相対インポートに変更）
 from models import Location, JongsoShop, SearchResponse
-from services import GoogleMapsService, LocationService
+from services import GoogleMapsService, LocationService, SentimentAnalysisService
 from config import settings
 
 # ロギング設定
@@ -26,7 +26,8 @@ app.add_middleware(
 
 # サービスの初期化
 google_maps_service = GoogleMapsService(settings.GOOGLE_MAPS_API_KEY)
-location_service = LocationService(google_maps_service)
+sentiment_service = SentimentAnalysisService()
+location_service = LocationService(google_maps_service, sentiment_service)
 
 # モックデータ
 mock_shops = [
@@ -72,14 +73,9 @@ async def api_search_by_keyword(keyword: str = Query(...)):
 
 @app.post("/api/search")
 async def api_search_jongso(location: Location):
-    # --- デバッグ用コードをコメントアウトまたは削除 ---
-    # logger.info(f"デバッグ: /api/search が呼び出されました。固定レスポンスを返します。")
-    # return {"results": [{"id": "test1", "name": "テスト雀荘", "address": "テスト住所", "lat": 35.0, "lng": 139.0, "rating": 5.0, "user_ratings_total": 10}]}
-    # --- ここまで ---
-
     logger.info(f"位置情報による検索: 緯度 {location.latitude}, 経度 {location.longitude}")
     try:
-        # Google Maps APIを使用して検索 (元のコード)
+        # 感情分析を含む検索処理
         shops = await location_service.search_nearby_jongso(
             latitude=location.latitude,
             longitude=location.longitude

@@ -35,24 +35,23 @@ const fetcher = async (url: string, body: any) => {
 
     const resClone = res.clone();
     const rawText = await resClone.text();
-    console.log(`Fetcher raw response text for ${url}: [${rawText}]`);
+    // console.log(`Fetcher raw response text for ${url}: [${rawText}]`); // デバッグ完了したのでコメントアウト
 
     if (!res.ok) {
       console.error(`Fetcher error response text: ${rawText}`);
       throw new Error(`An error occurred while fetching the data. Status: ${res.status}, Body: ${rawText}`);
     }
 
-    console.log(`Attempting to parse JSON for ${url}...`);
+    // console.log(`Attempting to parse JSON for ${url}...`); // デバッグ完了したのでコメントアウト
     const data = await res.json();
-    console.log(`Successfully parsed JSON for ${url}. Type: ${typeof data}`);
-    console.log(`Fetcher response JSON data for ${url}:`, data);
+    // console.log(`Successfully parsed JSON for ${url}. Type: ${typeof data}`); // デバッグ完了したのでコメントアウト
+    // console.log(`Fetcher response JSON data for ${url}:`, data); // デバッグ完了したのでコメントアウト
 
     if (data === null) {
         console.warn(`Parsed JSON data is null for ${url}. Raw text was: [${rawText}]`);
     }
 
-    // SWRに返す直前の値をログ
-    console.log(`Fetcher returning data for ${url}:`, data);
+    // console.log(`Fetcher returning data for ${url}:`, data); // デバッグ完了したのでコメントアウト
     return data;
   } catch (error: any) {
     console.error(`Fetcher caught an error for ${url}:`, error);
@@ -66,7 +65,6 @@ const fetcher = async (url: string, body: any) => {
     if(res) {
       console.error(`Response status at time of error: ${res.status}`);
     }
-    // エラー時はnullではなくエラーをスローしてSWRにエラーを伝える
     throw error;
   }
 };
@@ -80,23 +78,23 @@ const keywordFetcher = async (url: string) => {
 
     const resClone = res.clone();
     const rawText = await resClone.text();
-    console.log(`KeywordFetcher raw response text for ${url}: [${rawText}]`);
+    // console.log(`KeywordFetcher raw response text for ${url}: [${rawText}]`); // デバッグ完了
 
     if (!res.ok) {
       console.error(`KeywordFetcher error response text: ${rawText}`);
       throw new Error(`An error occurred while fetching the keyword data. Status: ${res.status}, Body: ${rawText}`);
     }
 
-    console.log(`Attempting to parse JSON for ${url}...`);
+    // console.log(`Attempting to parse JSON for ${url}...`); // デバッグ完了
     const data = await res.json();
-    console.log(`Successfully parsed JSON for ${url}. Type: ${typeof data}`);
-    console.log(`KeywordFetcher response JSON data for ${url}:`, data);
+    // console.log(`Successfully parsed JSON for ${url}. Type: ${typeof data}`); // デバッグ完了
+    // console.log(`KeywordFetcher response JSON data for ${url}:`, data); // デバッグ完了
 
     if (data === null) {
       console.warn(`Parsed JSON data is null for ${url}. Raw text was: [${rawText}]`);
     }
 
-    console.log(`KeywordFetcher returning data for ${url}:`, data);
+    // console.log(`KeywordFetcher returning data for ${url}:`, data); // デバッグ完了
     return data;
   } catch (error: any) {
     console.error(`KeywordFetcher caught an error for ${url}:`, error);
@@ -124,7 +122,6 @@ export default function Home() {
     ([url, coords]) => fetcher(`${API_BASE_URL}${url}`, coords),
     {
       revalidateOnFocus: false,
-      // エラー時に再試行しないように設定 (デバッグのため)
       shouldRetryOnError: false
     }
   );
@@ -138,29 +135,26 @@ export default function Home() {
     }
   );
 
-  // ログ出力用のuseEffect
-  useEffect(() => {
-    // SWR データが undefined から始まるため、nullと比較する
-    if (locationData !== undefined) {
-      console.log("SWR Location Data Updated:", locationData);
-    }
-    if(locationError) console.error("SWR Location Error:", locationError);
-  }, [locationData, locationError]);
+  // useEffect(() => { // デバッグ完了したのでコメントアウト
+  //   if (locationData !== undefined) {
+  //     console.log("SWR Location Data Updated:", locationData);
+  //   }
+  //   if(locationError) console.error("SWR Location Error:", locationError);
+  // }, [locationData, locationError]);
 
-  useEffect(() => {
-    if (keywordData !== undefined) {
-      console.log("SWR Keyword Data Updated:", keywordData);
-    }
-    if(keywordError) console.error("SWR Keyword Error:", keywordError);
-  }, [keywordData, keywordError]);
+  // useEffect(() => { // デバッグ完了したのでコメントアウト
+  //   if (keywordData !== undefined) {
+  //     console.log("SWR Keyword Data Updated:", keywordData);
+  //   }
+  //   if(keywordError) console.error("SWR Keyword Error:", keywordError);
+  // }, [keywordData, keywordError]);
 
   const results: Place[] = searchKeyword ? (keywordData?.results || []) : (locationData?.results || []);
 
-  // 算出された results のログ
-  useEffect(() => {
-    console.log("Calculated Results:", results);
-    console.log("Results length:", results.length);
-  }, [results]);
+  // useEffect(() => { // デバッグ完了したのでコメントアウト
+  //   console.log("Calculated Results:", results);
+  //   console.log("Results length:", results.length);
+  // }, [results]);
 
   const handleGetLocation = () => {
     navigator.geolocation.getCurrentPosition(
@@ -252,22 +246,29 @@ export default function Home() {
 
                 <div className="flex items-center gap-2 mt-3 text-sm text-gray-700">
                   ⭐ {place.rating}（{place.user_ratings_total}件）
+                  {/* おすすめ表示ロジックは現状維持 or 調整 */}
                   {place.positive_score !== undefined && place.positive_score >= 80 && (
                     <span className="ml-2 text-yellow-500">🌟おすすめ</span>
                   )}
                 </div>
 
+                {/* --- 感情分析結果の表示を追加 --- */}
                 {(place.positive_score !== null && place.negative_score !== null) && (
                   <div className="text-sm text-gray-500 mt-2">
-                    ポジティブ度: {place.positive_score}% / ネガティブ度: {place.negative_score}%
+                    <span className="text-green-600">ポジティブ度: {place.positive_score}%</span> / <span className="text-red-600">ネガティブ度: {place.negative_score}%</span>
                   </div>
                 )}
 
-                {place.summary && (
-                  <p className="text-gray-700 text-sm mt-4 leading-relaxed">
-                    {place.summary}
-                  </p>
+                {place.summary && place.summary !== "情報なし" && place.summary !== "分析エラー" && (
+                  <details className="mt-4">
+                      <summary className="text-sm text-gray-600 cursor-pointer hover:text-gray-800">AI要約</summary>
+                      <p className="text-gray-700 text-sm mt-2 p-3 bg-gray-100 rounded">
+                          {place.summary}
+                      </p>
+                  </details>
                 )}
+                 {/* ------------------------------ */}
+
               </div>
             );
           })}
