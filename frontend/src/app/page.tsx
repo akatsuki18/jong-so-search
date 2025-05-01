@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import useSWR from 'swr';
 
 interface Place {
@@ -15,17 +15,104 @@ interface Place {
   positive_score?: number;
   negative_score?: number;
   summary?: string;
+  id?: string;
 }
 
-const fetcher = (url: string, body: any) =>
-  fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  }).then((res) => res.json());
+// APIのベースURL（ローカル開発用）
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
-const keywordFetcher = (url: string) =>
-  fetch(url).then((res) => res.json());
+const fetcher = async (url: string, body: any) => {
+  console.log(`Fetcher calling: ${url}`);
+  let res;
+  try {
+    res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+
+    console.log(`Fetcher response status: ${res.status} for ${url}`);
+
+    const resClone = res.clone();
+    const rawText = await resClone.text();
+    console.log(`Fetcher raw response text for ${url}: [${rawText}]`);
+
+    if (!res.ok) {
+      console.error(`Fetcher error response text: ${rawText}`);
+      throw new Error(`An error occurred while fetching the data. Status: ${res.status}, Body: ${rawText}`);
+    }
+
+    console.log(`Attempting to parse JSON for ${url}...`);
+    const data = await res.json();
+    console.log(`Successfully parsed JSON for ${url}. Type: ${typeof data}`);
+    console.log(`Fetcher response JSON data for ${url}:`, data);
+
+    if (data === null) {
+        console.warn(`Parsed JSON data is null for ${url}. Raw text was: [${rawText}]`);
+    }
+
+    // SWRに返す直前の値をログ
+    console.log(`Fetcher returning data for ${url}:`, data);
+    return data;
+  } catch (error: any) {
+    console.error(`Fetcher caught an error for ${url}:`, error);
+    if (error instanceof Error) {
+        console.error('Error name:', error.name);
+        console.error('Error message:', error.message);
+        console.error('Error stack:', error.stack);
+    } else {
+        console.error('Caught non-Error object:', error);
+    }
+    if(res) {
+      console.error(`Response status at time of error: ${res.status}`);
+    }
+    // エラー時はnullではなくエラーをスローしてSWRにエラーを伝える
+    throw error;
+  }
+};
+
+const keywordFetcher = async (url: string) => {
+  console.log(`KeywordFetcher calling: ${url}`);
+  let res;
+  try {
+    res = await fetch(url);
+    console.log(`KeywordFetcher response status: ${res.status} for ${url}`);
+
+    const resClone = res.clone();
+    const rawText = await resClone.text();
+    console.log(`KeywordFetcher raw response text for ${url}: [${rawText}]`);
+
+    if (!res.ok) {
+      console.error(`KeywordFetcher error response text: ${rawText}`);
+      throw new Error(`An error occurred while fetching the keyword data. Status: ${res.status}, Body: ${rawText}`);
+    }
+
+    console.log(`Attempting to parse JSON for ${url}...`);
+    const data = await res.json();
+    console.log(`Successfully parsed JSON for ${url}. Type: ${typeof data}`);
+    console.log(`KeywordFetcher response JSON data for ${url}:`, data);
+
+    if (data === null) {
+      console.warn(`Parsed JSON data is null for ${url}. Raw text was: [${rawText}]`);
+    }
+
+    console.log(`KeywordFetcher returning data for ${url}:`, data);
+    return data;
+  } catch (error: any) {
+    console.error(`KeywordFetcher caught an error for ${url}:`, error);
+    if (error instanceof Error) {
+      console.error('Error name:', error.name);
+      console.error('Error message:', error.message);
+      console.error('Error stack:', error.stack);
+    } else {
+      console.error('Caught non-Error object:', error);
+    }
+    if(res) {
+      console.error(`Response status at time of error: ${res.status}`);
+    }
+    throw error;
+  }
+};
 
 export default function Home() {
   const [coords, setCoords] = useState<{ latitude: number; longitude: number } | null>(null);
@@ -33,25 +120,55 @@ export default function Home() {
   const [searchKeyword, setSearchKeyword] = useState<string>('');
 
   const { data: locationData, error: locationError, isLoading: locationIsLoading } = useSWR(
-    coords ? ['/search', coords] : null,
-    ([url, coords]) => fetcher('http://localhost:8000/search', coords),
-    { revalidateOnFocus: false }
+    coords ? ['/api/search', coords] : null,
+    ([url, coords]) => fetcher(`${API_BASE_URL}${url}`, coords),
+    {
+      revalidateOnFocus: false,
+      // エラー時に再試行しないように設定 (デバッグのため)
+      shouldRetryOnError: false
+    }
   );
 
   const { data: keywordData, error: keywordError, isLoading: keywordIsLoading } = useSWR(
-    searchKeyword ? `http://localhost:8000/search_by_keyword?keyword=${encodeURIComponent(searchKeyword)}` : null,
-    keywordFetcher,
-    { revalidateOnFocus: false }
+    searchKeyword ? `/api/search_by_keyword?keyword=${encodeURIComponent(searchKeyword)}` : null,
+    (url) => keywordFetcher(`${API_BASE_URL}${url}`),
+    {
+      revalidateOnFocus: false,
+      shouldRetryOnError: false
+    }
   );
 
-  const results = searchKeyword ? (keywordData?.results || []) : (locationData?.results || []);
+  // ログ出力用のuseEffect
+  useEffect(() => {
+    // SWR データが undefined から始まるため、nullと比較する
+    if (locationData !== undefined) {
+      console.log("SWR Location Data Updated:", locationData);
+    }
+    if(locationError) console.error("SWR Location Error:", locationError);
+  }, [locationData, locationError]);
+
+  useEffect(() => {
+    if (keywordData !== undefined) {
+      console.log("SWR Keyword Data Updated:", keywordData);
+    }
+    if(keywordError) console.error("SWR Keyword Error:", keywordError);
+  }, [keywordData, keywordError]);
+
+  const results: Place[] = searchKeyword ? (keywordData?.results || []) : (locationData?.results || []);
+
+  // 算出された results のログ
+  useEffect(() => {
+    console.log("Calculated Results:", results);
+    console.log("Results length:", results.length);
+  }, [results]);
 
   const handleGetLocation = () => {
     navigator.geolocation.getCurrentPosition(
       (position) => {
         const { latitude, longitude } = position.coords;
+        console.log(`位置情報を取得しました: 緯度 ${latitude}, 経度 ${longitude}`);
         setCoords({ latitude, longitude });
-        setSearchKeyword(''); // 位置情報検索時はキーワード検索をリセット
+        setSearchKeyword('');
       },
       (error) => console.error('位置情報エラー', error)
     );
@@ -60,7 +177,7 @@ export default function Home() {
   const handleKeywordSearch = (e: React.FormEvent) => {
     e.preventDefault();
     setSearchKeyword(keyword);
-    setCoords(null); // キーワード検索時は位置情報をリセット
+    setCoords(null);
   };
 
   return (
@@ -98,16 +215,19 @@ export default function Home() {
         </div>
 
         <div className="space-y-6">
-          {(locationError || keywordError) && <p className="text-red-500">エラーが発生しました。</p>}
+          {(locationIsLoading || keywordIsLoading) && <p className="text-gray-500 text-center">検索中...</p>}
+          {!(locationIsLoading || keywordIsLoading) && (locationError || keywordError) && <p className="text-red-500">エラーが発生しました: {locationError?.message || keywordError?.message}</p>}
+          {!(locationIsLoading || keywordIsLoading) && !(locationError || keywordError) && results.length === 0 && <p className="text-gray-500 text-center">検索結果がありません。</p>}
           {results.map((place: Place, index: number) => {
+            const key = place.id || index;
             const googleMapsUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(place.name + ' ' + place.address)}`;
 
             const distanceKm = place.distanceKm ?? null;
             const walkMinutes = place.walkMinutes ?? null;
-            const smokingStatus = place.smoking_status ?? place.smoking ?? null; // どちらも見ておく
+            const smokingStatus = place.smoking_status ?? place.smoking ?? null;
 
             return (
-              <div key={index} className="border-b border-gray-300 pb-6 mb-6">
+              <div key={key} className="border-b border-gray-300 pb-6 mb-6">
                 <a href={googleMapsUrl} target="_blank" rel="noopener noreferrer" className="text-xl font-bold text-blue-600 hover:underline">
                   {place.name}
                 </a>
