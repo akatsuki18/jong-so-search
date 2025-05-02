@@ -2,6 +2,7 @@ import logging
 import googlemaps
 from fastapi import HTTPException
 from geopy.distance import geodesic
+from datetime import datetime, timezone # datetime と timezone をインポート
 # 外部サービスのインポートパスはプロジェクト構造に合わせて調整が必要
 # from .google_maps_service import GoogleMapsService
 # from .sentiment_analysis_service import SentimentAnalysisService
@@ -288,6 +289,7 @@ class LocationService:
 
         logger.info(f"Attempting to save/update {len(results)} results to DB table 'jongso_shops'.")
         records_to_upsert = []
+        current_time_utc = datetime.now(timezone.utc).isoformat() # 現在時刻を取得
         for result in results:
             record = {
                 'place_id': result['id'],
@@ -300,11 +302,15 @@ class LocationService:
                 'smoking_status': result.get('smoking_status'),
                 'positive_score': result.get('positive_score'),
                 'negative_score': result.get('negative_score'),
-                'summary': result.get('summary')
+                'summary': result.get('summary'),
+                'last_fetched_at': current_time_utc # last_fetched_at を追加
             }
+            # None の値を持つキーを除外 (必要に応じて)
+            # record = {k: v for k, v in record.items() if v is not None}
             records_to_upsert.append(record)
 
         try:
+            # upsertのcolumnsパラメータに 'last_fetched_at' を追加
             self.db_client.table('jongso_shops').upsert(records_to_upsert).execute()
             logger.info(f"Successfully saved/updated {len(records_to_upsert)} records to DB table 'jongso_shops'.")
         except Exception as e:
