@@ -231,13 +231,15 @@ class LocationService:
         self.google_maps_service = google_maps_service
         self.sentiment_service = sentiment_service
         self.supabase = supabase_client
+        # --- DB操作の同時実行数を制限するセマフォを追加 (例: 5) ---
+        self.db_semaphore = asyncio.Semaphore(5)
+        # --------------------------------------------------------
 
     async def search_nearby_jongso(self, latitude: float, longitude: float) -> List[Dict[str, Any]]:
-        """位置情報に基づいて雀荘を検索し、感情分析結果を含めて返し、新しい店舗情報を保存する"""
+        """位置情報に基づいて雀荘を検索し、DBに存在すればDBから、なければ新規取得・分析・保存する"""
         logger.info("LocationService: search_nearby_jongso 呼び出し")
         places_result = await self.google_maps_service.search_nearby_places(latitude, longitude)
 
-        results = []
         place_list = places_result.get("results", [])
         logger.info(f"Google Mapsから {len(place_list)} 件の結果を取得")
 
@@ -247,32 +249,77 @@ class LocationService:
             if place_id:
                 tasks.append(self._process_place(place))
 
-        processed_results_with_data = await asyncio.gather(*tasks)
+        processed_results = await asyncio.gather(*tasks)
 
         save_tasks = []
+        update_tasks = []
         valid_results_for_response = []
-        for shop_data in processed_results_with_data:
-            if shop_data:
-                response_data = shop_data.copy()
-                response_data['id'] = response_data.pop('place_id')
-                valid_results_for_response.append(response_data)
-                save_tasks.append(self._save_shop_if_not_exists(shop_data))
 
-        if save_tasks:
-            for task in save_tasks:
+        for result_tuple in processed_results:
+            if result_tuple:
+                shop_data, source = result_tuple
+                if shop_data:
+                    response_data = shop_data.copy()
+                    # DBから取得した場合、キーはDBのカラム名のはず
+                    # place_id が shop_data (DBから取得) にある前提
+                    current_place_id = shop_data.get('place_id')
+                    if current_place_id:
+                        response_data['id'] = current_place_id # レスポンス用IDを設定
+                        # DBデータには place_id しかないので削除は不要
+                        # response_data.pop('place_id', None) # もし残っていても削除
+                    else:
+                         logger.warning(f"shop_data に place_id が含まれていません: {shop_data}")
+                         continue
+
+                    valid_results_for_response.append(response_data)
+
+                    if source == 'db':
+                        # 更新は place_id で行う
+                        update_tasks.append(self._update_last_fetched_at(current_place_id))
+                    elif source == 'new':
+                        # 保存は place_id を含む元の shop_data で行う
+                        save_tasks.append(self._save_shop_if_not_exists(shop_data))
+
+        background_tasks = save_tasks + update_tasks
+        if background_tasks:
+            # タスクをバックグラウンドで実行 (セマフォによる制御は各メソッド内で行う)
+            for task in background_tasks:
                 asyncio.create_task(task)
-            logger.info(f"{len(save_tasks)} 件の店舗保存処理を開始しました（バックグラウンド実行）")
+            logger.info(f"{len(save_tasks)} 件の新規保存、{len(update_tasks)} 件の最終取得日時更新処理を開始しました（バックグラウンド実行）")
 
         logger.info(f"最終的なAPI応答結果件数: {len(valid_results_for_response)}")
         return self._sort_results(valid_results_for_response)
 
-    async def _process_place(self, place: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-        """個々の店舗情報を処理し、Supabase保存形式のデータを返す"""
+    async def _process_place(self, place: Dict[str, Any]) -> Optional[tuple[Dict[str, Any], str]]:
+        """個々の店舗情報を処理。DBにあればDBから返し、なければGoogle Maps/AI処理して返す"""
         place_id = place.get("place_id")
         name = place.get("name", "")
-        logger.info(f"店舗処理開始: {name} (place_id={place_id})")
+        if not place_id:
+             logger.warning("_process_place に place_id がないデータが渡されました。スキップします。")
+             return None
+
+        logger.debug(f"店舗処理開始(DBチェック含む): {name} (place_id={place_id})" )
 
         try:
+            # 1. Supabase DBに place_id が存在するか確認 (セマフォは使わない)
+            loop = asyncio.get_event_loop()
+            db_response = await loop.run_in_executor(
+                None,
+                lambda: self.supabase.table("jongso_shops")
+                .select("*, place_id") # place_id も含めて全カラム取得
+                .eq("place_id", place_id)
+                .maybe_single()
+                .execute()
+            )
+
+            if db_response.data:
+                logger.info(f"DBヒット: {name} (place_id={place_id}) の情報をDBから取得しました。")
+                shop_data_from_db = db_response.data
+                return shop_data_from_db, "db"
+
+            # 2. DBに存在しない場合: Google Maps / AI 処理を実行 (セマフォは使わない)
+            logger.info(f"DBミス: {name} (place_id={place_id}) は新規情報。Google Maps/AI処理を実行します。")
+
             reviews = await self.google_maps_service.get_place_reviews(place_id)
             sentiment_task = self.sentiment_service.analyze_reviews(reviews)
             smoking_task = self.sentiment_service.analyze_smoking_status(reviews)
@@ -284,15 +331,14 @@ class LocationService:
             address = place.get("vicinity", "")
             rating_raw = place.get("rating")
             rating = float(rating_raw) if rating_raw is not None else None
-
             user_ratings_total = place.get("user_ratings_total")
             user_ratings_total = int(user_ratings_total) if user_ratings_total is not None else None
-
             location = place.get("geometry", {}).get("location", {})
             lat = location.get("lat")
             lng = location.get("lng")
 
-            shop_data = {
+            # Supabase保存用データを作成 (place_id を含む)
+            shop_data_new = {
                 "place_id": place_id,
                 "name": name,
                 "address": address,
@@ -306,49 +352,88 @@ class LocationService:
                 "smoking_status": smoking_status_result,
                 "last_fetched_at": datetime.datetime.now(datetime.timezone.utc).isoformat()
             }
-            logger.info(f"店舗処理完了: {name} - Sentiment: P{sentiment_result['positive_score']} N{sentiment_result['negative_score']}, Smoking: {smoking_status_result}")
+            logger.info(f"店舗処理完了(新規): {name} - Sentiment: P{sentiment_result['positive_score']} N{sentiment_result['negative_score']}, Smoking: {smoking_status_result}")
 
-            return shop_data
+            return shop_data_new, "new"
 
         except Exception as e:
             logger.error(f"店舗処理エラー: {name} (place_id={place_id}), {e}", exc_info=True)
             return None
 
     async def _save_shop_if_not_exists(self, shop_data: Dict[str, Any]):
-        """place_id が存在しない場合、Supabaseに雀荘情報を保存する"""
+        """place_id が存在しない場合、Supabaseに雀荘情報を保存する (同時実行数制限付き)"""
         place_id = shop_data.get("place_id")
         if not place_id:
-            logger.warning("place_id がないため、データベースへの保存をスキップします。")
+            logger.warning("save: place_id がないためスキップします。")
             return
 
-        try:
-            logger.debug(f"Supabase 存在チェック開始: place_id={place_id}")
-            loop = asyncio.get_event_loop()
-            response = await loop.run_in_executor(
-                None,
-                lambda: self.supabase.table("jongso_shops").select("place_id", count="exact").eq("place_id", place_id).execute()
-            )
-
-            existing_count = response.count
-            logger.debug(f"Supabase 存在チェック結果: place_id={place_id}, count={existing_count}")
-
-            if existing_count is not None and existing_count == 0:
-                logger.info(f"新規店舗情報検出、Supabaseへ保存開始: place_id={place_id}, name={shop_data.get('name')}")
-                insert_response = await loop.run_in_executor(
+        async with self.db_semaphore: # セマフォを取得
+            logger.debug(f"save: セマフォ取得 (place_id={place_id})" )
+            try:
+                logger.debug(f"Supabase 保存チェック開始: place_id={place_id}")
+                loop = asyncio.get_event_loop()
+                # 存在チェック
+                response = await loop.run_in_executor(
                     None,
-                    lambda: self.supabase.table("jongso_shops").insert({k: v for k, v in shop_data.items() if v is not None}).execute()
+                    lambda: self.supabase.table("jongso_shops").select("place_id", count="exact").eq("place_id", place_id).execute()
                 )
-                if hasattr(insert_response, 'data') and insert_response.data:
-                     logger.info(f"Supabaseへの保存成功: place_id={place_id}")
-                else:
-                     logger.error(f"Supabaseへの保存に失敗または予期せぬ応答: place_id={place_id}, response={insert_response}")
+                existing_count = response.count
+                logger.debug(f"Supabase 保存チェック結果: place_id={place_id}, count={existing_count}")
 
-        except Exception as e:
-            logger.error(f"Supabase 操作中にエラーが発生しました (place_id={place_id}): {e}", exc_info=True)
+                if existing_count is not None and existing_count == 0:
+                    logger.info(f"新規店舗情報、Supabaseへ保存実行: place_id={place_id}, name={shop_data.get('name')}")
+                    # 挿入実行
+                    insert_response = await loop.run_in_executor(
+                        None,
+                        lambda: self.supabase.table("jongso_shops").insert({k: v for k, v in shop_data.items() if v is not None}).execute()
+                    )
+                    if hasattr(insert_response, 'data') and insert_response.data:
+                         logger.info(f"Supabaseへの保存成功: place_id={place_id}")
+                    else:
+                         logger.error(f"Supabaseへの保存に失敗または予期せぬ応答: place_id={place_id}, response={insert_response}")
+                # else: # 存在する場合は何もしない (ログも不要)
+
+            except Exception as e:
+                logger.error(f"Supabase 保存操作中にエラーが発生しました (place_id={place_id}): {e}", exc_info=True)
+            finally:
+                 logger.debug(f"save: セマフォ解放 (place_id={place_id})" )
+                 # セマフォは async with ブロックを抜ける際に自動的に解放される
+
+    async def _update_last_fetched_at(self, place_id: str):
+        """指定された place_id のレコードの last_fetched_at を更新する (同時実行数制限付き)"""
+        if not place_id:
+            logger.warning("update: place_id がないためスキップします。")
+            return
+
+        async with self.db_semaphore: # セマフォを取得
+            logger.debug(f"update: セマフォ取得 (place_id={place_id})" )
+            try:
+                logger.debug(f"Supabase last_fetched_at 更新開始: place_id={place_id}")
+                loop = asyncio.get_event_loop()
+                # 更新実行
+                update_response = await loop.run_in_executor(
+                    None,
+                    lambda: self.supabase.table("jongso_shops")
+                    .update({"last_fetched_at": datetime.datetime.now(datetime.timezone.utc).isoformat()})
+                    .eq("place_id", place_id)
+                    .execute()
+                )
+
+                if hasattr(update_response, 'data') and update_response.data:
+                     logger.info(f"Supabase last_fetched_at 更新成功: place_id={place_id}")
+                else:
+                     logger.warning(f"Supabase last_fetched_at 更新結果が空でした (レコードが存在しない可能性?): place_id={place_id}, response={update_response}")
+
+            except Exception as e:
+                # ConnectionTerminated もここで捕捉される
+                logger.error(f"Supabase last_fetched_at 更新中にエラーが発生しました (place_id={place_id}): {e}", exc_info=True)
+            finally:
+                logger.debug(f"update: セマフォ解放 (place_id={place_id})" )
+                # セマフォは async with ブロックを抜ける際に自動的に解放される
 
     def _sort_results(self, results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """評価とレビュー数でソートする (API応答データ用)"""
         return sorted(
             results,
-            key=lambda x: (-x.get("rating", 0), -x.get("user_ratings_total", 0))
+            key=lambda x: (-float(x.get("rating", 0) or 0), -int(x.get("user_ratings_total", 0) or 0))
         )
