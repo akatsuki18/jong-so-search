@@ -209,9 +209,6 @@ export default function Home() {
         </div>
 
         <div className="space-y-6">
-          {(locationIsLoading || keywordIsLoading) && <p className="text-gray-500 text-center">検索中...</p>}
-          {!(locationIsLoading || keywordIsLoading) && (locationError || keywordError) && <p className="text-red-500">エラーが発生しました: {locationError?.message || keywordError?.message}</p>}
-          {!(locationIsLoading || keywordIsLoading) && !(locationError || keywordError) && results.length === 0 && <p className="text-gray-500 text-center">検索結果がありません。</p>}
           {results.map((place: Place, index: number) => {
             const key = place.id || index;
             const googleMapsUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(place.name + ' ' + place.address)}`;
