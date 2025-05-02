@@ -97,6 +97,69 @@ class SentimentAnalysisService:
 
         return results
 
+    def get_smoking_status_from_reviews(self, reviews):
+        """レビューリストから OpenAI を使って喫煙情報を判定する"""
+        if not self._check_client():
+            logger.warning("OpenAI client not available, cannot determine smoking status.")
+            return "不明" # クライアントがない場合は不明を返す
+        if not reviews:
+            logger.debug("No reviews provided to determine smoking status.")
+            return "不明"
+
+        logger.info(f"Determining smoking status from {len(reviews)} reviews using OpenAI.")
+
+        # プロンプト用にレビューテキストを結合・整形
+        MAX_REVIEW_LENGTH = 300 # 1レビューあたりの最大文字数
+        review_texts = "\n".join([f"- {r.get('text', '')[:MAX_REVIEW_LENGTH]}" for r in reviews if r.get('text')])
+
+        if not review_texts:
+             logger.warning("No valid review texts found to determine smoking status.")
+             return "不明"
+
+        MAX_TOTAL_LENGTH = 3000 # プロンプトに含めるレビューの合計最大文字数
+        if len(review_texts) > MAX_TOTAL_LENGTH:
+            logger.warning(f"Review texts length ({len(review_texts)}) exceeds limit ({MAX_TOTAL_LENGTH}) for smoking status check, truncating.")
+            review_texts = review_texts[:MAX_TOTAL_LENGTH] + "... (一部省略)"
+
+        prompt = f"""以下の麻雀店に関する複数のレビューを読み、喫煙情報を判定してください。
+レビュー内容から判断できる場合、「喫煙可」「禁煙」「分煙」のいずれか該当するものを、最も可能性が高いもの一つだけ選んでください。
+判断できない場合は「不明」と回答してください。回答は「喫煙可」「禁煙」「分煙」「不明」のいずれかのみとしてください。
+
+レビュー:
+{review_texts}
+"""
+
+        try:
+            response = self.client.chat.completions.create(
+                model="gpt-4o-mini", # 喫煙情報判定に適したモデルを選択
+                messages=[
+                    {"role": "system", "content": "あなたはユーザーレビューから麻雀店の喫煙情報を「喫煙可」「禁煙」「分煙」「不明」のいずれかで判定するAIアシスタントです。"},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.1, # 低めの温度で安定した判定を促す
+                max_tokens=10 # 「喫煙可」「禁煙」「分煙」「不明」のいずれかの単語のみを期待
+            )
+
+            smoking_status_raw = response.choices[0].message.content.strip()
+            # 判定結果を正規化
+            if "喫煙可" in smoking_status_raw:
+                smoking_status = "喫煙可"
+            elif "禁煙" in smoking_status_raw:
+                smoking_status = "禁煙"
+            elif "分煙" in smoking_status_raw:
+                smoking_status = "分煙"
+            else:
+                smoking_status = "不明" # 想定外の応答や判定不能の場合
+
+            logger.info(f"Determined smoking status using OpenAI: {smoking_status} (Raw: '{smoking_status_raw}')")
+            return smoking_status
+        except openai.APIError as e:
+            logger.error(f"OpenAI API returned an API Error during smoking status check: {e}")
+            return "不明" # エラー時は不明
+        except Exception as e:
+            logger.error(f"An unexpected error occurred during OpenAI smoking status check: {e}", exc_info=True)
+            return "不明" # エラー時は不明
+
     def get_summary_from_reviews(self, reviews):
         """レビューリストから OpenAI を使って要約を生成する"""
         if not self._check_client():

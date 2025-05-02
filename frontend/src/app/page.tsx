@@ -218,7 +218,7 @@ export default function Home() {
 
             const distanceKm = place.distanceKm ?? null;
             const walkMinutes = place.walkMinutes ?? null;
-            const smokingStatus = place.smoking_status ?? place.smoking ?? null;
+            const smokingStatus = place.smoking_status || place.smoking || "不明";
 
             return (
               <div key={key} className="border-b border-gray-300 pb-6 mb-6">
@@ -235,14 +235,12 @@ export default function Home() {
                   </p>
                 )}
 
-                {smokingStatus && (
-                  <div className="mt-3 inline-flex items-center gap-2 text-sm font-medium">
-                    {smokingStatus === '禁煙' && <span className="px-2 py-1 bg-green-100 text-green-800 rounded-full">🚭 禁煙</span>}
-                    {smokingStatus === '分煙' && <span className="px-2 py-1 bg-yellow-100 text-yellow-800 rounded-full">🚬 分煙</span>}
-                    {smokingStatus === '喫煙可' && <span className="px-2 py-1 bg-red-100 text-red-600 rounded-full">🔥 喫煙可</span>}
-                    {smokingStatus === '情報なし' && <span className="px-2 py-1 bg-gray-200 text-gray-600 rounded-full">❓ 情報なし</span>}
-                  </div>
-                )}
+                <div className="mt-3 inline-flex items-center gap-2 text-sm font-medium">
+                  {smokingStatus === '禁煙' && <span className="px-2 py-1 bg-green-100 text-green-800 rounded-full">🚭 禁煙</span>}
+                  {smokingStatus === '分煙' && <span className="px-2 py-1 bg-yellow-100 text-yellow-800 rounded-full">🚬 分煙</span>}
+                  {smokingStatus === '喫煙可' && <span className="px-2 py-1 bg-red-100 text-red-800 rounded-full">🔥 喫煙可</span>}
+                  {smokingStatus === '不明' && <span className="px-2 py-1 bg-gray-100 text-gray-600 rounded-full">❓ 不明</span>}
+                </div>
 
                 <div className="flex items-center gap-2 mt-3 text-sm text-gray-700">
                   ⭐ {place.rating}（{place.user_ratings_total}件）

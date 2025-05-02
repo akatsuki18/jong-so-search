@@ -131,6 +131,12 @@ class LocationService:
                         logger.debug(f"Calculated Sentiment scores for {place_id}: Pos={positive_score}, Neg={negative_score}")
                         summary = self.sentiment_service.get_summary_from_reviews(reviews)
                         logger.debug(f"Generated summary for {place_id}: {summary[:50]}...")
+
+                        # DBに喫煙情報がない場合にレビューから判定する
+                        if smoking_status == "不明":
+                            smoking_status = self.sentiment_service.get_smoking_status_from_reviews(reviews)
+                            logger.debug(f"Determined smoking status for {place_id} from reviews: {smoking_status}")
+
                     else:
                         logger.debug(f"No review texts found for {place_id} to analyze.")
                         summary = db_summary if db_summary else "有効なレビューが見つかりませんでした。"
@@ -262,6 +268,7 @@ class LocationService:
                 'lng': result.get('lng'),
                 'rating': result.get('rating'),
                 'user_ratings_total': result.get('user_ratings_total'),
+                'smoking_status': result.get('smoking_status'),
                 'positive_score': result.get('positive_score'),
                 'negative_score': result.get('negative_score'),
                 'summary': result.get('summary')
