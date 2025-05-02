@@ -51,7 +51,6 @@ const fetcher = async (url: string, body: any) => {
         console.warn(`Parsed JSON data is null for ${url}. Raw text was: [${rawText}]`);
     }
 
-    // console.log(`Fetcher returning data for ${url}:`, data); // デバッグ完了したのでコメントアウト
     return data;
   } catch (error: any) {
     console.error(`Fetcher caught an error for ${url}:`, error);
@@ -78,23 +77,18 @@ const keywordFetcher = async (url: string) => {
 
     const resClone = res.clone();
     const rawText = await resClone.text();
-    // console.log(`KeywordFetcher raw response text for ${url}: [${rawText}]`); // デバッグ完了
 
     if (!res.ok) {
       console.error(`KeywordFetcher error response text: ${rawText}`);
       throw new Error(`An error occurred while fetching the keyword data. Status: ${res.status}, Body: ${rawText}`);
     }
 
-    // console.log(`Attempting to parse JSON for ${url}...`); // デバッグ完了
     const data = await res.json();
-    // console.log(`Successfully parsed JSON for ${url}. Type: ${typeof data}`); // デバッグ完了
-    // console.log(`KeywordFetcher response JSON data for ${url}:`, data); // デバッグ完了
 
     if (data === null) {
       console.warn(`Parsed JSON data is null for ${url}. Raw text was: [${rawText}]`);
     }
 
-    // console.log(`KeywordFetcher returning data for ${url}:`, data); // デバッグ完了
     return data;
   } catch (error: any) {
     console.error(`KeywordFetcher caught an error for ${url}:`, error);
@@ -135,26 +129,7 @@ export default function Home() {
     }
   );
 
-  // useEffect(() => { // デバッグ完了したのでコメントアウト
-  //   if (locationData !== undefined) {
-  //     console.log("SWR Location Data Updated:", locationData);
-  //   }
-  //   if(locationError) console.error("SWR Location Error:", locationError);
-  // }, [locationData, locationError]);
-
-  // useEffect(() => { // デバッグ完了したのでコメントアウト
-  //   if (keywordData !== undefined) {
-  //     console.log("SWR Keyword Data Updated:", keywordData);
-  //   }
-  //   if(keywordError) console.error("SWR Keyword Error:", keywordError);
-  // }, [keywordData, keywordError]);
-
   const results: Place[] = searchKeyword ? (keywordData?.results || []) : (locationData?.results || []);
-
-  // useEffect(() => { // デバッグ完了したのでコメントアウト
-  //   console.log("Calculated Results:", results);
-  //   console.log("Results length:", results.length);
-  // }, [results]);
 
   const handleGetLocation = () => {
     navigator.geolocation.getCurrentPosition(
