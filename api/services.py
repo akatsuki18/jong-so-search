@@ -7,6 +7,8 @@ from config import settings
 from langchain_openai import ChatOpenAI
 from langchain.prompts import ChatPromptTemplate
 import os
+import datetime
+from supabase import create_client, Client
 
 logger = logging.getLogger(__name__)
 
@@ -225,12 +227,13 @@ class GoogleMapsService:
         return reviews_text
 
 class LocationService:
-    def __init__(self, google_maps_service: GoogleMapsService, sentiment_service: SentimentAnalysisService):
+    def __init__(self, google_maps_service: GoogleMapsService, sentiment_service: SentimentAnalysisService, supabase_client: Client):
         self.google_maps_service = google_maps_service
         self.sentiment_service = sentiment_service
+        self.supabase = supabase_client
 
     async def search_nearby_jongso(self, latitude: float, longitude: float) -> List[Dict[str, Any]]:
-        """位置情報に基づいて雀荘を検索し、感情分析結果を含めて返す"""
+        """位置情報に基づいて雀荘を検索し、感情分析結果を含めて返し、新しい店舗情報を保存する"""
         logger.info("LocationService: search_nearby_jongso 呼び出し")
         places_result = await self.google_maps_service.search_nearby_places(latitude, longitude)
 
@@ -244,61 +247,107 @@ class LocationService:
             if place_id:
                 tasks.append(self._process_place(place))
 
-        processed_results = await asyncio.gather(*tasks)
+        processed_results_with_data = await asyncio.gather(*tasks)
 
-        results = [res for res in processed_results if res is not None]
+        save_tasks = []
+        valid_results_for_response = []
+        for shop_data in processed_results_with_data:
+            if shop_data:
+                response_data = shop_data.copy()
+                response_data['id'] = response_data.pop('place_id')
+                valid_results_for_response.append(response_data)
+                save_tasks.append(self._save_shop_if_not_exists(shop_data))
 
-        logger.info(f"最終的な結果件数: {len(results)}")
-        return self._sort_results(results)
+        if save_tasks:
+            for task in save_tasks:
+                asyncio.create_task(task)
+            logger.info(f"{len(save_tasks)} 件の店舗保存処理を開始しました（バックグラウンド実行）")
+
+        logger.info(f"最終的なAPI応答結果件数: {len(valid_results_for_response)}")
+        return self._sort_results(valid_results_for_response)
 
     async def _process_place(self, place: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-        """個々の店舗情報を処理（口コミ取得、感情分析）"""
+        """個々の店舗情報を処理し、Supabase保存形式のデータを返す"""
         place_id = place.get("place_id")
         name = place.get("name", "")
         logger.info(f"店舗処理開始: {name} (place_id={place_id})")
 
         try:
-            # 口コミ取得 (並列化も可能だが、ここでは逐次)
             reviews = await self.google_maps_service.get_place_reviews(place_id)
-
-            # 感情分析と喫煙状況分析を並列実行
             sentiment_task = self.sentiment_service.analyze_reviews(reviews)
             smoking_task = self.sentiment_service.analyze_smoking_status(reviews)
-
             sentiment_result, smoking_status_result = await asyncio.gather(
                 sentiment_task,
                 smoking_task
             )
 
             address = place.get("vicinity", "")
-            rating = place.get("rating", 0)
-            user_ratings_total = place.get("user_ratings_total", 0)
+            rating_raw = place.get("rating")
+            rating = float(rating_raw) if rating_raw is not None else None
+
+            user_ratings_total = place.get("user_ratings_total")
+            user_ratings_total = int(user_ratings_total) if user_ratings_total is not None else None
+
             location = place.get("geometry", {}).get("location", {})
             lat = location.get("lat")
             lng = location.get("lng")
 
             shop_data = {
-                "id": place_id,
+                "place_id": place_id,
                 "name": name,
                 "address": address,
-                "lat": lat,
-                "lng": lng,
+                "lat": float(lat) if lat is not None else None,
+                "lng": float(lng) if lng is not None else None,
                 "rating": rating,
                 "user_ratings_total": user_ratings_total,
                 "positive_score": sentiment_result["positive_score"],
                 "negative_score": sentiment_result["negative_score"],
                 "summary": sentiment_result["summary"],
-                "smoking_status": smoking_status_result # AIによる判定結果で上書き
+                "smoking_status": smoking_status_result,
+                "last_fetched_at": datetime.datetime.now(datetime.timezone.utc).isoformat()
             }
             logger.info(f"店舗処理完了: {name} - Sentiment: P{sentiment_result['positive_score']} N{sentiment_result['negative_score']}, Smoking: {smoking_status_result}")
+
             return shop_data
 
         except Exception as e:
             logger.error(f"店舗処理エラー: {name} (place_id={place_id}), {e}", exc_info=True)
             return None
 
+    async def _save_shop_if_not_exists(self, shop_data: Dict[str, Any]):
+        """place_id が存在しない場合、Supabaseに雀荘情報を保存する"""
+        place_id = shop_data.get("place_id")
+        if not place_id:
+            logger.warning("place_id がないため、データベースへの保存をスキップします。")
+            return
+
+        try:
+            logger.debug(f"Supabase 存在チェック開始: place_id={place_id}")
+            loop = asyncio.get_event_loop()
+            response = await loop.run_in_executor(
+                None,
+                lambda: self.supabase.table("jongso_shops").select("place_id", count="exact").eq("place_id", place_id).execute()
+            )
+
+            existing_count = response.count
+            logger.debug(f"Supabase 存在チェック結果: place_id={place_id}, count={existing_count}")
+
+            if existing_count is not None and existing_count == 0:
+                logger.info(f"新規店舗情報検出、Supabaseへ保存開始: place_id={place_id}, name={shop_data.get('name')}")
+                insert_response = await loop.run_in_executor(
+                    None,
+                    lambda: self.supabase.table("jongso_shops").insert({k: v for k, v in shop_data.items() if v is not None}).execute()
+                )
+                if hasattr(insert_response, 'data') and insert_response.data:
+                     logger.info(f"Supabaseへの保存成功: place_id={place_id}")
+                else:
+                     logger.error(f"Supabaseへの保存に失敗または予期せぬ応答: place_id={place_id}, response={insert_response}")
+
+        except Exception as e:
+            logger.error(f"Supabase 操作中にエラーが発生しました (place_id={place_id}): {e}", exc_info=True)
+
     def _sort_results(self, results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """評価とレビュー数でソートする"""
+        """評価とレビュー数でソートする (API応答データ用)"""
         return sorted(
             results,
             key=lambda x: (-x.get("rating", 0), -x.get("user_ratings_total", 0))
