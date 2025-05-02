@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 
 class SentimentAnalysisService:
     def __init__(self):
-        chat_model = os.getenv("OPENAI_CHAT_MODEL", "gpt-3.5-turbo")
+        chat_model = os.getenv("OPENAI_CHAT_MODEL", "gpt-4o-mini")
         if not settings.OPENAI_API_KEY:
             logger.error("OpenAI APIキーが設定されていません。感情分析はスキップされます。")
             self.llm = None
@@ -52,6 +52,7 @@ class SentimentAnalysisService:
 - 「禁煙」という単語があっても、レビュー全体で煙の匂いや流れ込みに関する不満が述べられている場合は「分煙」または「喫煙可」と判断してください。
 - 単に「タバコ」や「煙」という単語があるだけでは判断せず、それが許可されている状況か、問題となっている状況かを考慮してください。
 - 最終的な回答は、選択肢の中の文字列**一つだけ**にしてください。余計な説明は不要です。
+- レビュー中に喫煙環境（禁煙、分煙、喫煙可、煙の匂い、喫煙席の有無など）に関する**具体的な記述が全く見当たらない場合**は、必ず「情報なし」を選択してください。推測で判断しないでください。
 
 レビュー:
 {combined_reviews}
