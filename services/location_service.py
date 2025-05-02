@@ -1,6 +1,7 @@
 import logging
 import googlemaps
 from fastapi import HTTPException
+from geopy.distance import geodesic
 # 外部サービスのインポートパスはプロジェクト構造に合わせて調整が必要
 # from .google_maps_service import GoogleMapsService
 # from .sentiment_analysis_service import SentimentAnalysisService
@@ -56,6 +57,7 @@ class LocationService:
         self.sentiment_service = sentiment_service
         self.db_client = db_client
         logger.info("LocationService initialized with provided services.")
+        self.walk_speed_km_per_hour = 4.8 # 徒歩速度 (km/h), 例: 80m/分 = 4.8km/h
 
     async def _get_jongso_from_db(self, place_id: str) -> dict | None:
         """指定された place_id を持つ雀荘情報をDBから取得する"""
@@ -83,8 +85,8 @@ class LocationService:
             logger.error(f"Error querying database for place_id {place_id}: {e}", exc_info=True)
             return None
 
-    async def _process_place_details(self, place: dict):
-        """Google Place の情報にDB情報やセンチメント分析結果を追加する共通処理"""
+    async def _process_place_details(self, place: dict, distanceKm: float | None = None, walkMinutes: int | None = None):
+        """Google Place の情報にDB情報やセンチメント分析結果、距離情報を追加する共通処理"""
         place_id = place.get('place_id')
         if not place_id:
             logger.warning("Place details processing skipped: place_id is missing.")
@@ -165,7 +167,9 @@ class LocationService:
             "positive_score": positive_score if positive_score is not None else 0,
             "negative_score": negative_score if negative_score is not None else 0,
             "summary": summary,
-            "last_fetched_at": last_fetched_at
+            "last_fetched_at": last_fetched_at,
+            "distanceKm": distanceKm,
+            "walkMinutes": walkMinutes
         }
         return processed_place
 
@@ -188,9 +192,34 @@ class LocationService:
             potential_places = places_result['results']
             logger.info(f"Nearby search with keyword '雀荘' found {len(potential_places)} potential places.")
 
+            user_location = (latitude, longitude) # ユーザーの現在地
+
             processed_results = []
             for place in potential_places:
-                processed_place = await self._process_place_details(place)
+                place_location_data = place.get('geometry', {}).get('location', {})
+                place_lat = place_location_data.get('lat')
+                place_lng = place_location_data.get('lng')
+
+                distanceKm = None
+                walkMinutes = None
+
+                if place_lat is not None and place_lng is not None:
+                    place_location = (place_lat, place_lng)
+                    try:
+                        # 距離計算 (km)
+                        distanceKm = geodesic(user_location, place_location).km
+                        # 徒歩時間計算 (分)
+                        walk_speed_km_per_minute = self.walk_speed_km_per_hour / 60
+                        if walk_speed_km_per_minute > 0:
+                            walkMinutes = round(distanceKm / walk_speed_km_per_minute)
+                        else:
+                            walkMinutes = None # 速度が0以下なら計算しない
+                    except ValueError:
+                        logger.warning(f"Could not calculate distance for place {place.get('name')}. Invalid coordinates?")
+                        distanceKm = None
+                        walkMinutes = None
+
+                processed_place = await self._process_place_details(place, distanceKm=distanceKm, walkMinutes=walkMinutes)
                 processed_results.append(processed_place)
 
             await self._save_results_to_db(processed_results)
@@ -234,7 +263,7 @@ class LocationService:
 
                 processed_results = []
                 for place in potential_places:
-                    processed_place = await self._process_place_details(place)
+                    processed_place = await self._process_place_details(place, distanceKm=None, walkMinutes=None)
                     processed_results.append(processed_place)
 
                 await self._save_results_to_db(processed_results)
