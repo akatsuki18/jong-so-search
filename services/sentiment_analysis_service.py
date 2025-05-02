@@ -1,46 +1,146 @@
 import logging
+import openai
 
 logger = logging.getLogger(__name__)
 
 class SentimentAnalysisService:
-    """テキストのセンチメント分析を行うサービスクラス（ダミー実装）"""
-    def __init__(self):
-        logger.info("Dummy SentimentAnalysisService initialized.")
-        # ここで実際のクライアント初期化などを行う
-        # 例: from google.cloud import language_v1
-        # self.client = language_v1.LanguageServiceClient()
+    """テキストのセンチメント分析と要約を行うサービスクラス"""
+    def __init__(self, api_key: str | None = None):
+        if not api_key:
+            logger.warning("OpenAI API Key is not provided. Summarization feature will be disabled.")
+            self.client = None
+        else:
+            try:
+                self.client = openai.OpenAI(api_key=api_key)
+                logger.info("OpenAI client initialized successfully for SentimentAnalysisService.")
+            except Exception as e:
+                logger.error(f"Failed to initialize OpenAI client: {e}", exc_info=True)
+                self.client = None
+
+    def _check_client(self):
+        """OpenAIクライアントが初期化されているかチェック"""
+        if not self.client:
+            logger.warning("OpenAI client is not initialized. Cannot perform operation.")
+            return False
+        return True
 
     def analyze_text_list(self, text_list):
-        """複数のテキストのセンチメントスコアを計算する（ダミー実装）"""
-        logger.info(f"[Dummy] Analyzing sentiment for {len(text_list)} texts.")
+        """複数のテキストのセンチメントスコアを OpenAI を使って計算する"""
+        if not self._check_client():
+            logger.warning("OpenAI client not available, returning dummy sentiment scores.")
+            # クライアントがない場合は、以前のダミーロジックを簡易的に返すか、デフォルト値を返す
+            return [{'text': text, 'positive_score': 5, 'negative_score': 5} for text in text_list]
+
+        logger.info(f"Analyzing sentiment for {len(text_list)} texts using OpenAI.")
         results = []
-        for i, text in enumerate(text_list):
-            # ダミーロジック: テキストの長さや特定の単語でスコアを決定
-            positive_score = 0.5 + (len(text) % 5) * 0.1 # 0.5 から 0.9
-            negative_score = 0.5 - (len(text) % 5) * 0.1 # 0.5 から 0.1
-            if "悪い" in text or "ひどい" in text:
-                positive_score = 0.1
-                negative_score = 0.9
-            elif "良い" in text or "最高" in text:
-                positive_score = 0.9
-                negative_score = 0.1
+        for text in text_list:
+            if not text or len(text.strip()) < 10: # 短すぎるテキストは分析スキップ
+                logger.debug(f"Skipping sentiment analysis for short/empty text: '{text[:20]}...'")
+                results.append({'text': text, 'positive_score': 5, 'negative_score': 5})
+                continue
+
+            # トークン数削減のため、長すぎるレビューは切り詰める
+            MAX_TEXT_LENGTH = 500 # センチメント分析対象の最大文字数 (調整可能)
+            truncated_text = text[:MAX_TEXT_LENGTH]
+            if len(text) > MAX_TEXT_LENGTH:
+                logger.debug(f"Truncating long text for sentiment analysis: '{truncated_text[:20]}...'")
+
+            prompt = f"以下のレビュー文のセンチメントを分析し、ポジティブ度を0から10の数値で評価してください。0が非常にネガティブ、10が非常にポジティブです。数値のみを回答してください。\n\nレビュー: {truncated_text}"
+
+            positive_score = 5 # デフォルトは中立
+            negative_score = 5
+
+            try:
+                response = self.client.chat.completions.create(
+                    model="gpt-4o-mini",
+                    messages=[
+                        {"role": "system", "content": "あなたはテキストのセンチメントを0から10の数値で評価するAIです。"},
+                        {"role": "user", "content": prompt}
+                    ],
+                    temperature=0.2, # 低めの温度で安定した評価を促す
+                    max_tokens=10 # 数値だけを期待
+                )
+
+                content = response.choices[0].message.content.strip()
+                # 数値のみを抽出する試み (より頑健なパースが必要な場合もある)
+                extracted_score = None
+                try:
+                    # 小数点を含む場合も考慮
+                    score_float = float(content)
+                    # 0から10の範囲に収める (可読性のため段階的に処理)
+                    score_rounded = round(score_float)
+                    extracted_score = max(0, min(10, score_rounded))
+                except ValueError:
+                     # f-string を使わない形式に変更
+                     log_message = "Failed to parse sentiment score from OpenAI response: '{}'. Using default score.".format(content)
+                     logger.warning(log_message)
+
+                if extracted_score is not None:
+                    positive_score = extracted_score
+                    negative_score = 10 - positive_score # ポジティブ度からネガティブ度を算出
+                    logger.debug(f"OpenAI sentiment score for '{truncated_text[:20]}...': {positive_score}/10")
+                else:
+                    logger.warning(f"Could not extract a valid score (0-10) from response: '{content}'. Using default 5/10.")
+
+            except openai.APIError as e:
+                logger.error(f"OpenAI API error during sentiment analysis for '{truncated_text[:20]}...': {e}")
+                # エラー時はデフォルト値を使用
+            except Exception as e:
+                logger.error(f"Unexpected error during sentiment analysis for '{truncated_text[:20]}...': {e}", exc_info=True)
+                # エラー時はデフォルト値を使用
 
             results.append({
-                'text': text,
-                'positive_score': round(positive_score, 2),
-                'negative_score': round(negative_score, 2)
+                'text': text, # 元のテキストを返す
+                'positive_score': positive_score,
+                'negative_score': negative_score
             })
-            logger.debug(f"[Dummy] Text: '{text[:20]}...' -> Pos: {results[-1]['positive_score']}, Neg: {results[-1]['negative_score']}")
+
         return results
 
     def get_summary_from_reviews(self, reviews):
-        """レビューリストから要約を生成する（ダミー実装）"""
-        logger.info(f"[Dummy] Generating summary from {len(reviews)} reviews.")
+        """レビューリストから OpenAI を使って要約を生成する"""
+        if not self._check_client():
+            return "要約機能は利用できません (APIキー未設定)"
         if not reviews:
             return "レビューがありません。"
 
-        # ダミーロジック: 最初のレビューを要約として返す
-        first_review_text = reviews[0].get('text', '' )
-        summary = f"(ダミー要約) {first_review_text[:50]}..."
-        logger.debug(f"[Dummy] Generated summary: {summary}")
-        return summary
+        logger.info(f"Generating summary from {len(reviews)} reviews using OpenAI.")
+
+        # プロンプト用にレビューテキストを結合・整形
+        # 長すぎるレビューは切り詰めるなど、トークン数制限への配慮が必要
+        MAX_REVIEW_LENGTH = 300 # 1レビューあたりの最大文字数 (調整可能)
+        review_texts = "\n".join([f"- {r.get('text', '')[:MAX_REVIEW_LENGTH]}" for r in reviews if r.get('text')])
+
+        if not review_texts:
+             logger.warning("No valid review texts found to generate summary.")
+             return "要約対象のレビューが見つかりません。"
+
+        # トークン数を考慮してレビュー数を制限する方が安全
+        # ここでは簡易的に文字数で制限
+        MAX_TOTAL_LENGTH = 3000 # プロンプトに含めるレビューの合計最大文字数 (調整可能)
+        if len(review_texts) > MAX_TOTAL_LENGTH:
+            logger.warning(f"Review texts length ({len(review_texts)}) exceeds limit ({MAX_TOTAL_LENGTH}), truncating.")
+            review_texts = review_texts[:MAX_TOTAL_LENGTH] + "... (一部省略)"
+
+        prompt = f"以下の麻雀店に関する複数のレビューを読み、ポジティブな点とネガティブな点を簡潔に1〜2文で要約してください。箇条書きではなく、自然な文章でお願いします。:\n\n{review_texts}"
+
+        try:
+            response = self.client.chat.completions.create(
+                model="gpt-3.5-turbo", # または他の適切なモデル
+                messages=[
+                    {"role": "system", "content": "あなたはユーザーレビューを要約するAIアシスタントです。"},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.5, # 低めの温度で事実に基づいた要約を促す
+                max_tokens=150 # 要約の最大長 (調整可能)
+            )
+
+            summary = response.choices[0].message.content.strip()
+            logger.info(f"Successfully generated summary using OpenAI: {summary[:50]}...")
+            return summary
+        except openai.APIError as e:
+            logger.error(f"OpenAI API returned an API Error: {e}")
+            return "レビューの要約中にAPIエラーが発生しました。"
+        except Exception as e:
+            logger.error(f"An unexpected error occurred during OpenAI summarization: {e}", exc_info=True)
+            return "レビューの要約中に予期せぬエラーが発生しました。"

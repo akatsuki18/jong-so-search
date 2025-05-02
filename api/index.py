@@ -36,7 +36,7 @@ app.add_middleware(
 
 # サービスの初期化
 google_maps_service = GoogleMapsService(api_key=settings.GOOGLE_MAPS_API_KEY)
-sentiment_service = SentimentAnalysisService()
+sentiment_service = SentimentAnalysisService(api_key=settings.OPENAI_API_KEY)
 
 # Supabase 同期クライアントの初期化に戻す
 if not settings.SUPABASE_URL or not settings.SUPABASE_KEY:
