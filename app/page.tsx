@@ -15,6 +15,7 @@ interface Place {
   positive_score?: number;
   negative_score?: number;
   summary?: string;
+  place_id?: string;
   id?: string;
 }
 
@@ -186,7 +187,7 @@ export default function Home() {
         <div className="space-y-6">
           {results.map((place: Place, index: number) => {
             const key = place.id || index;
-            const googleMapsUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(place.name + ' ' + place.address)}`;
+            const googleMapsUrl = `https://www.google.com/maps/place/?q=place_id:${place.place_id}`;
 
             const distanceKm = place.distanceKm ?? null;
             const walkMinutes = place.walkMinutes ?? null;

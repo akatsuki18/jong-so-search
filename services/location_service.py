@@ -181,7 +181,8 @@ class LocationService:
             "summary": summary,
             "last_fetched_at": last_fetched_at,
             "distanceKm": distanceKm,
-            "walkMinutes": walkMinutes
+            "walkMinutes": walkMinutes,
+            "place_id": place_id
         }
         return processed_place
 
