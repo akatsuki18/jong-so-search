@@ -3,6 +3,7 @@ import googlemaps
 from fastapi import HTTPException
 from geopy.distance import geodesic
 from datetime import datetime, timezone # datetime と timezone をインポート
+from postgrest.exceptions import APIError
 # 外部サービスのインポートパスはプロジェクト構造に合わせて調整が必要
 # from .google_maps_service import GoogleMapsService
 # from .sentiment_analysis_service import SentimentAnalysisService
@@ -82,8 +83,18 @@ class LocationService:
                 # レスポンスが期待通りでない場合 (None や data 無し含む)
                 logger.warning(f"No valid DB record found or unexpected response for {place_id}. Response: {response}")
                 return None
+        except APIError as e:
+            # maybe_single() で結果が0件の場合、PostgREST は 204 を返し、
+            # postgrest-py は APIError を発生させる。これはデータが無い正常ケースとして扱う。
+            if e.code == '204':
+                logger.warning(f"No DB record found for {place_id} (APIError 204 from maybe_single).")
+                return None
+            else:
+                # それ以外の APIError は本来のエラーとしてログ出力
+                logger.error(f"APIError querying database for place_id {place_id}: {e}", exc_info=True)
+                return None
         except Exception as e:
-            logger.error(f"Error querying database for place_id {place_id}: {e}", exc_info=True)
+            logger.error(f"Unexpected error querying database for place_id {place_id}: {e}", exc_info=True)
             return None
 
     async def _process_place_details(self, place: dict, distanceKm: float | None = None, walkMinutes: int | None = None):
@@ -222,6 +233,9 @@ class LocationService:
 
                 processed_place = await self._process_place_details(place, distanceKm=distanceKm, walkMinutes=walkMinutes)
                 processed_results.append(processed_place)
+
+            # レーティングの降順でソート (Noneは末尾に)
+            processed_results.sort(key=lambda x: x.get('rating', -1) if x.get('rating') is not None else -1, reverse=True)
 
             await self._save_results_to_db(processed_results)
 

@@ -53,38 +53,6 @@ else:
     logger.warning("Supabaseクライアントが初期化できなかったため、保存機能なしで LocationService をセットアップします。")
     location_service = None
 
-# モックデータ
-mock_shops = [
-    {
-        "id": "mock1",
-        "name": "雀荘A",
-        "address": "東京都新宿区1-1-1",
-        "lat": 35.6895,
-        "lng": 139.6917,
-        "rating": 4.5,
-        "user_ratings_total": 123,
-        "smoking_status": "全面禁煙",
-        "positive_score": 8,
-        "negative_score": 2,
-        "summary": "きれいな雀荘です。全卓禁煙。",
-        "last_fetched_at": "2023-11-01T12:00:00"
-    },
-    {
-        "id": "mock2",
-        "name": "雀荘B",
-        "address": "東京都渋谷区2-2-2",
-        "lat": 35.6580,
-        "lng": 139.7016,
-        "rating": 4.0,
-        "user_ratings_total": 89,
-        "smoking_status": "分煙",
-        "positive_score": 6,
-        "negative_score": 4,
-        "summary": "広い店内で快適に遊べます。",
-        "last_fetched_at": "2023-11-02T14:30:00"
-    }
-]
-
 # --- リクエストボディのモデル定義を追加 ---
 class SearchRequest(BaseModel):
     latitude: float
