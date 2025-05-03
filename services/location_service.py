@@ -2,7 +2,7 @@ import logging
 import googlemaps
 from fastapi import HTTPException
 from geopy.distance import geodesic
-from datetime import datetime, timezone # datetime と timezone をインポート
+from datetime import datetime, timezone, timedelta # timedelta を追加
 from postgrest.exceptions import APIError
 # 外部サービスのインポートパスはプロジェクト構造に合わせて調整が必要
 # from .google_maps_service import GoogleMapsService
@@ -294,38 +294,98 @@ class LocationService:
             raise HTTPException(status_code=500, detail="キーワード検索中に予期せぬエラーが発生しました。") from e
 
     async def _save_results_to_db(self, results: list):
-        """検索結果リストをDBに保存/更新する"""
+        """検索結果リストをDBに保存/更新する。ただし、last_fetched_atが30日以内のレコードは更新しない"""
         if not self.db_client:
             logger.warning("Supabase client is not available, skipping DB save.")
             return
         if not results:
             return
 
-        logger.info(f"Attempting to save/update {len(results)} results to DB table 'jongso_shops'.")
-        records_to_upsert = []
-        current_time_utc = datetime.now(timezone.utc).isoformat() # 現在時刻を取得
-        for result in results:
-            record = {
-                'place_id': result['id'],
-                'name': result.get('name'),
-                'address': result.get('address'),
-                'lat': result.get('lat'),
-                'lng': result.get('lng'),
-                'rating': result.get('rating'),
-                'user_ratings_total': result.get('user_ratings_total'),
-                'smoking_status': result.get('smoking_status'),
-                'positive_score': result.get('positive_score'),
-                'negative_score': result.get('negative_score'),
-                'summary': result.get('summary'),
-                'last_fetched_at': current_time_utc # last_fetched_at を追加
-            }
-            # None の値を持つキーを除外 (必要に応じて)
-            # record = {k: v for k, v in record.items() if v is not None}
-            records_to_upsert.append(record)
+        logger.info(f"Attempting to save/update {len(results)} results to DB table 'jongso_shops', skipping recent records.")
 
+        place_ids = [result['id'] for result in results if result.get('id')]
+        if not place_ids:
+            logger.warning("No valid place_ids found in results, skipping DB save.")
+            return
+
+        # DBから既存レコードのlast_fetched_atを取得
+        existing_records = {}
         try:
-            # upsertのcolumnsパラメータに 'last_fetched_at' を追加
-            self.db_client.table('jongso_shops').upsert(records_to_upsert).execute()
-            logger.info(f"Successfully saved/updated {len(records_to_upsert)} records to DB table 'jongso_shops'.")
+            response = self.db_client.table('jongso_shops') \
+                .select("place_id, last_fetched_at") \
+                .in_('place_id', place_ids) \
+                .execute()
+
+            if response and hasattr(response, 'data'):
+                for record in response.data:
+                    existing_records[record['place_id']] = record.get('last_fetched_at')
+                logger.debug(f"Fetched last_fetched_at for {len(existing_records)} existing records.")
+            else:
+                logger.warning(f"Could not fetch existing records or unexpected response: {response}")
+
         except Exception as e:
-            logger.error(f"Error saving results to database table 'jongso_shops': {e}", exc_info=True)
+            logger.error(f"Error fetching existing records from DB: {e}", exc_info=True)
+            # エラーが発生しても、できる限り処理を続行する（既存レコードが見つからなかったものとして扱う）
+
+        records_to_upsert = []
+        skipped_count = 0
+        current_time_utc = datetime.now(timezone.utc)
+        thirty_days_ago = current_time_utc - timedelta(days=30) # 30日前の datetime オブジェクト
+
+        for result in results:
+            place_id = result.get('id')
+            if not place_id:
+                continue # place_id がない結果はスキップ
+
+            existing_last_fetched_at_str = existing_records.get(place_id)
+
+            # 既存レコードがあり、かつ last_fetched_at が30日以内かチェック
+            should_skip = False
+            if existing_last_fetched_at_str:
+                try:
+                    # ISO 8601 文字列を aware な datetime オブジェクトに変換
+                    existing_last_fetched_at = datetime.fromisoformat(existing_last_fetched_at_str)
+                    # タイムゾーン情報がない場合は UTC とみなす (DBの保存形式に依存)
+                    if existing_last_fetched_at.tzinfo is None:
+                         # 警告: タイムゾーンなしの文字列は予期せぬ挙動の可能性
+                         logger.warning(f"last_fetched_at for {place_id} ('{existing_last_fetched_at_str}') lacks timezone info. Assuming UTC.")
+                         existing_last_fetched_at = existing_last_fetched_at.replace(tzinfo=timezone.utc)
+
+                    if existing_last_fetched_at > thirty_days_ago:
+                        should_skip = True
+                        skipped_count += 1
+                        logger.debug(f"Skipping update for place_id {place_id}: last_fetched_at ({existing_last_fetched_at}) is within 30 days.")
+                except ValueError:
+                    logger.warning(f"Could not parse last_fetched_at ('{existing_last_fetched_at_str}') for place_id {place_id}. Proceeding with upsert.")
+                except Exception as e:
+                    logger.error(f"Error processing last_fetched_at for {place_id}: {e}", exc_info=True)
+
+
+            if not should_skip:
+                record = {
+                    'place_id': place_id,
+                    'name': result.get('name'),
+                    'address': result.get('address'),
+                    'lat': result.get('lat'),
+                    'lng': result.get('lng'),
+                    'rating': result.get('rating'),
+                    'user_ratings_total': result.get('user_ratings_total'),
+                    'smoking_status': result.get('smoking_status'),
+                    'positive_score': result.get('positive_score'),
+                    'negative_score': result.get('negative_score'),
+                    'summary': result.get('summary'),
+                    'last_fetched_at': current_time_utc.isoformat() # 現在時刻を ISO 形式で設定
+                }
+                records_to_upsert.append(record)
+
+        if not records_to_upsert:
+            logger.info(f"No records to upsert after filtering based on last_fetched_at. Skipped {skipped_count} records.")
+            return
+
+        logger.info(f"Attempting to upsert {len(records_to_upsert)} records (skipped {skipped_count}).")
+        try:
+            # upsertのcolumnsパラメータに 'last_fetched_at' を追加する必要はない（デフォルトですべてのカラムが対象）
+            self.db_client.table('jongso_shops').upsert(records_to_upsert).execute()
+            logger.info(f"Successfully upserted {len(records_to_upsert)} records to DB table 'jongso_shops'.")
+        except Exception as e:
+            logger.error(f"Error upserting records to database table 'jongso_shops': {e}", exc_info=True)
