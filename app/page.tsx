@@ -22,7 +22,7 @@ interface Place {
 // APIのベースURL（ローカル開発用）
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
-const fetcher = async (url: string, body: any) => {
+const fetcher = async (url: string, body: { latitude: number; longitude: number }) => {
   console.log(`Fetcher calling: ${url}`);
   let res;
   try {
@@ -53,7 +53,7 @@ const fetcher = async (url: string, body: any) => {
     }
 
     return data;
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error(`Fetcher caught an error for ${url}:`, error);
     if (error instanceof Error) {
         console.error('Error name:', error.name);
@@ -91,7 +91,7 @@ const keywordFetcher = async (url: string) => {
     }
 
     return data;
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error(`KeywordFetcher caught an error for ${url}:`, error);
     if (error instanceof Error) {
       console.error('Error name:', error.name);
@@ -112,7 +112,7 @@ export default function Home() {
   const [keyword, setKeyword] = useState<string>('');
   const [searchKeyword, setSearchKeyword] = useState<string>('');
 
-  const { data: locationData, error: locationError, isLoading: locationIsLoading } = useSWR(
+  const { data: locationData, isLoading: locationIsLoading } = useSWR(
     coords ? ['/api/search', coords] : null,
     ([url, coords]) => fetcher(`${API_BASE_URL}${url}`, coords),
     {
@@ -121,7 +121,7 @@ export default function Home() {
     }
   );
 
-  const { data: keywordData, error: keywordError, isLoading: keywordIsLoading } = useSWR(
+  const { data: keywordData, isLoading: keywordIsLoading } = useSWR(
     searchKeyword ? `/api/search_by_keyword?keyword=${encodeURIComponent(searchKeyword)}` : null,
     (url) => keywordFetcher(`${API_BASE_URL}${url}`),
     {
