@@ -114,7 +114,7 @@ def health_check():
     return {"status": "ok"}
 
 # Vercelのサーバーレス関数として動作するためのハンドラー
-handler = Mangum(app)
+handler = Mangum(app, lifespan="off")
 
 # AWS Lambda 形式のハンドラー関数を削除
 # def handler(event, context):
