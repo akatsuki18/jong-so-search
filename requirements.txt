@@ -4,7 +4,7 @@ uvicorn==0.21.1
 pydantic==2.7.1
 python-dotenv==1.0.0
 googlemaps==4.10.0
-openai==1.3.5
+openai>=1.35.0
 geopy
 mangum
 supabase
