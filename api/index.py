@@ -13,6 +13,7 @@ from config import settings
 from services.google_maps_service import GoogleMapsService
 from services.location_service import LocationService
 from services.sentiment_analysis_service import SentimentAnalysisService
+from mangum import Mangum
 
 # ロギング設定
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -113,5 +114,5 @@ def health_check():
     return {"status": "ok"}
 
 # Vercelのサーバーレス関数として動作するためのハンドラー
-def handler(request: Request):
-    return app
+# handler 関数を削除し、Mangum でラップしたものを handler とする
+handler = Mangum(app)
