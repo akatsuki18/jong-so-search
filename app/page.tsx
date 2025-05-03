@@ -15,7 +15,7 @@ interface Place {
   positive_score?: number;
   negative_score?: number;
   summary?: string;
-  place_id?: string;
+  place_id: string;
   id?: string;
 }
 
