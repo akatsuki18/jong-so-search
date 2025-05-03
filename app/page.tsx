@@ -20,7 +20,7 @@ interface Place {
 }
 
 // APIのベースURL（ローカル開発用）
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api';
 
 const fetcher = async (url: string, body: { latitude: number; longitude: number }) => {
   console.log(`Fetcher calling: ${url}`);
@@ -113,7 +113,7 @@ export default function Home() {
   const [searchKeyword, setSearchKeyword] = useState<string>('');
 
   const { data: locationData, isLoading: locationIsLoading } = useSWR(
-    coords ? ['/api/search', coords] : null,
+    coords ? ['/search', coords] : null,
     ([url, coords]) => fetcher(`${API_BASE_URL}${url}`, coords),
     {
       revalidateOnFocus: false,
@@ -122,7 +122,7 @@ export default function Home() {
   );
 
   const { data: keywordData, isLoading: keywordIsLoading } = useSWR(
-    searchKeyword ? `/api/search_by_keyword?keyword=${encodeURIComponent(searchKeyword)}` : null,
+    searchKeyword ? `/search_by_keyword?keyword=${encodeURIComponent(searchKeyword)}` : null,
     (url) => keywordFetcher(`${API_BASE_URL}${url}`),
     {
       revalidateOnFocus: false,
