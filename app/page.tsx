@@ -187,7 +187,11 @@ export default function Home() {
         <div className="space-y-6">
           {results.map((place: Place, index: number) => {
             const key = place.id || index;
-            const googleMapsUrl = `https://www.google.com/maps/place/?q=place_id:${place.place_id}`;
+
+            // --- お店の名前だけで検索するURLに変更 ---
+            const googleMapsUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(place.name)}`;
+            console.log(`Generated URL (Name Only): ${googleMapsUrl}`); // デバッグ用ログ
+            // ---------------------------------------
 
             const distanceKm = place.distanceKm ?? null;
             const walkMinutes = place.walkMinutes ?? null;
@@ -195,6 +199,7 @@ export default function Home() {
 
             return (
               <div key={key} className="border-b border-gray-300 pb-6 mb-6">
+                {/* a href は変更後の googleMapsUrl を使用 */}
                 <a href={googleMapsUrl} target="_blank" rel="noopener noreferrer" className="text-xl font-bold text-blue-600 hover:underline">
                   {place.name}
                 </a>
