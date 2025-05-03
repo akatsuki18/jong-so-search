@@ -13,7 +13,7 @@ from config import settings
 from services.google_maps_service import GoogleMapsService
 from services.location_service import LocationService
 from services.sentiment_analysis_service import SentimentAnalysisService
-from mangum import Mangum
+# from mangum import Mangum # Mangum のインポートを削除
 
 # ロギング設定
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -112,12 +112,3 @@ async def search_nearby(request: SearchRequest):
 @app.get("/health")
 def health_check():
     return {"status": "ok"}
-
-# Vercelのサーバーレス関数として動作するためのハンドラー
-handler = Mangum(app, lifespan="off")
-
-# AWS Lambda 形式のハンドラー関数を削除
-# def handler(event, context):
-#     asgi_handler = Mangum(app)
-#     response = asgi_handler(event, context)
-#     return response
